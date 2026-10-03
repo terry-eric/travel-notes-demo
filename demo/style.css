@@ -1,0 +1,6 @@
+.demo-banner{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:0 0 18px;padding:14px 18px;border:1px solid #c8d8cc;border-radius:14px;background:#e9f1e7;color:#244c42}
+.demo-banner strong{font-size:14px;display:block}.demo-banner small{font-size:12px;display:block;margin-top:4px}.demo-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.demo-banner p{width:100%;margin:0;font-size:13px}
+#demo-days-dialog{width:min(620px,calc(100vw - 28px))}#demo-days-dialog .dialog-heading p{max-width:460px}#demo-day-form{display:grid;gap:14px}#demo-day-form label{display:grid;gap:7px;font-size:14px;color:#43584c}#demo-day-form input,#demo-day-form select,#demo-day-form textarea{width:100%;font:inherit;border:1px solid #ced8cc;border-radius:9px;padding:10px;background:#fff;color:#1d3027}.demo-day-order{display:flex;gap:8px;flex-wrap:wrap}#demo-day-status{font-size:13px;margin:0}
+body #reload-place-map,body #retry-maps{display:none!important}
+@media(max-width:700px){.demo-banner{padding:12px;margin-top:6px}.demo-actions{width:100%}.demo-actions button{font-size:12px}.demo-banner strong{font-size:13px}}
+@media print{.demo-banner,#demo-days-dialog{display:none}}

@@ -1,0 +1,23 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import {textAssetNames,binaryAssetNames,assetNames,assetType} from './assets.mjs';
+const root=process.cwd();
+const dest=path.resolve(root,'dist');
+if(dest!==path.join(root,'dist')||!fs.existsSync(path.join(root,'public/index.html')))throw Error('Invalid project path');
+// Generated output only; the authored files now live under public/ and server/.
+fs.rmSync(dest,{recursive:true,force:true});
+fs.mkdirSync(path.join(dest,'server'),{recursive:true});
+const assets={};
+for(const name of textAssetNames)assets[name]=fs.readFileSync(path.join(root,'public',name),'utf8');
+const binaryAssets=Object.fromEntries(binaryAssetNames.map(name=>[name,fs.readFileSync(path.join(root,'public',name)).toString('base64')]));
+const assetTypes=Object.fromEntries(assetNames.map(name=>[name,assetType(name)]));
+const linkParser=fs.readFileSync('public/maps-link.js','utf8').replaceAll('export function','function');
+const identity=fs.readFileSync('public/identity.js','utf8').replace('export function','function');
+const inlineModule=file=>fs.readFileSync(file,'utf8').replace(/^import .*;\r?\n/gm,'').replace(/^export \{.*\};\r?\n/gm,'').replace(/^export /gm,'');
+const api=linkParser+'\n'+identity+'\n'+inlineModule('server/trips.js')+'\n'+inlineModule('server/api.js')+'\n'+inlineModule('server/sharing.js');
+const mapsConfig=fs.readFileSync('server/maps-config.js','utf8').replace('export function','function');
+const mapsResolve=fs.readFileSync('server/maps-resolve.js','utf8').replace("import {parseMapsShare,locationFromMapsUrl} from '../public/maps-link.js';",'').replaceAll('export async function','async function');
+const seed=fs.readFileSync('public/seed.js','utf8').replace('export const','const');
+const output=mapsConfig+'\n'+seed+'\n'+api+'\n'+mapsResolve+'\nconst assets='+JSON.stringify(assets)+';\nconst binaryAssets='+JSON.stringify(binaryAssets)+';\nconst assetTypes='+JSON.stringify(assetTypes)+';\n'+`export default {async fetch(request,env){const path=new URL(request.url).pathname;if(path==='/api/maps-resolve')return handleMapsResolve(request);if(path==='/api/maps-config')return handleMapsConfig(request,env);if(path==='/api/trip')return handleApi(request,env);if(path==='/api/trips')return handleTrips(request,env);if(path==='/api/session')return request.method==='GET'?sessionFor(request,env):new Response(null,{status:405});if(path==='/api/shares')return handleSharing(request,env);if(!['GET','HEAD'].includes(request.method))return new Response('Method not allowed',{status:405});const key=['/','/trips','/overview','/daily','/map','/notes'].includes(path)?'index.html':path.slice(1);if(!Object.hasOwn(assetTypes,key))return new Response('Not found',{status:404});const body=Object.hasOwn(binaryAssets,key)?Uint8Array.from(atob(binaryAssets[key]),c=>c.charCodeAt(0)):assets[key];return new Response(request.method==='HEAD'?null:body,{headers:{'Content-Type':assetTypes[key],'Cache-Control':'no-cache','X-Content-Type-Options':'nosniff'}});}};`;
+fs.writeFileSync(path.join(dest,'server/index.js'),output);
+console.log('Cloud Worker built: dist/server/index.js (migrations stay in drizzle/).');

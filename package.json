@@ -1,0 +1,25 @@
+{
+  "name": "travel-notes-demo",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=24.0.0" },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "build:demo": "node scripts/build-demo.mjs",
+    "dev": "node scripts/dev.mjs",
+    "dev:trip": "node scripts/dev-trip.mjs",
+    "dev:demo": "node scripts/dev-demo.mjs",
+    "db:generate": "drizzle-kit generate",
+    "test": "node --test tests/*.test.mjs",
+    "deploy": "npm run build && wrangler deploy --config wrangler.jsonc"
+  },
+  "devDependencies": {
+    "drizzle-orm": "0.45.2",
+    "drizzle-kit": "0.31.10",
+    "wrangler": "4.145.0"
+  },
+  "overrides": {
+    "@esbuild-kit/core-utils": { "esbuild": "0.25.12" }
+  }
+}

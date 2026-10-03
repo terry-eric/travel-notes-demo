@@ -1,0 +1,16 @@
+{
+  "id": "./",
+  "name": "旅手帖 · 旅行規劃",
+  "short_name": "旅手帖",
+  "description": "管理多趟旅行，規劃每日行程與地圖，邀請同行者一起同步。",
+  "lang": "zh-Hant",
+  "start_url": "./trips",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f8f8f3",
+  "theme_color": "#285346",
+  "icons": [
+    {"src":"./icon-192.png","sizes":"192x192","type":"image/png","purpose":"any maskable"},
+    {"src":"./icon-512.png","sizes":"512x512","type":"image/png","purpose":"any maskable"}
+  ]
+}

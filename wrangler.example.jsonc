@@ -1,0 +1,31 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "travel-notes",
+  "main": "server/cloudflare.js",
+  "compatibility_date": "2026-10-01",
+  // Serve only the configured Access-protected hostname, including preview URLs.
+  "workers_dev": false,
+  "preview_urls": false,
+  // The trailing wildcard also matches /trip?query. The Worker separately
+  // rejects /tripper and every path outside the /trip boundary.
+  "routes": [
+    { "pattern": "trip.example.com/trip*", "zone_name": "example.com" }
+  ],
+  "vars": {
+    "APP_HOST": "trip.example.com",
+    "APP_BASE": "/trip",
+    "ACCESS_ISSUER": "https://your-team.cloudflareaccess.com",
+    "ACCESS_AUD": "COPY_YOUR_ACCESS_APPLICATION_AUD",
+    // Public sample account; set your own login email before first API use.
+    "OWNER_EMAIL": "owner@example.com"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "travel-notes-db",
+      "database_id": "COPY_YOUR_D1_DATABASE_ID",
+      "migrations_dir": "drizzle"
+    }
+  ],
+  "build": { "command": "npm run build" }
+}

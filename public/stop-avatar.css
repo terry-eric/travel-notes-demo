@@ -1,0 +1,23 @@
+/* The span has no controls or listeners; card clicks and drag gestures still bubble. */
+.stop-avatar{display:inline-grid;place-items:center;flex:0 0 28px;width:28px;height:28px;max-width:28px;border:1px solid #273d361f;border-radius:50%;background:var(--stop-avatar-bg,#e8ede7);color:var(--stop-avatar-fg,#627369);font-family:system-ui,"Microsoft JhengHei",sans-serif;font-size:12px;font-weight:700;line-height:1;letter-spacing:0;align-self:flex-start;user-select:none;-webkit-user-select:none;cursor:inherit;touch-action:inherit;box-sizing:border-box}
+.stop-avatar>*{pointer-events:none}
+.stop-avatar-letter{display:block;line-height:1;text-align:center}
+.stop-avatar svg{width:19px;height:19px;display:block}
+
+/* Append the avatar to the daily card's existing time/tag header. */
+.stop.has-stop-avatar .stop-card-head,.stop-card-head:has(>.stop-avatar){position:relative;min-height:28px;padding-inline-end:38px}
+.stop-card-head>.stop-avatar{position:absolute;inset-block-start:0;inset-inline-end:0}
+.stop.has-stop-avatar .stop-card-head>.tag,.stop-card-head:has(>.stop-avatar)>.tag{max-width:100%;overflow-wrap:anywhere}
+
+/* Compact overview cards reserve space for the avatar throughout the text column. */
+.mini-stop.has-stop-avatar,.mini-stop:has(>.stop-avatar){position:relative;padding-inline-end:46px!important}
+.mini-stop>.stop-avatar{position:absolute;inset-block-start:10px;inset-inline-end:10px}
+.mini-stop.has-stop-avatar .tag,.mini-stop:has(>.stop-avatar) .tag{max-width:100%;overflow-wrap:anywhere}
+
+/* Map cards keep their place name flexible when an avatar is the final child. */
+.map-stop.has-stop-avatar>span:not(.stop-avatar){min-width:0}
+.map-stop.has-stop-avatar>span:not(.map-stop-number):not(.stop-avatar),.map-stop:has(>.stop-avatar)>span:not(.map-stop-number):not(.stop-avatar){min-width:0;flex:1}
+.map-stop>.stop-avatar{margin-inline-start:auto}
+.map-stop.has-stop-avatar .tag,.map-stop:has(>.stop-avatar) .tag{max-width:100%;overflow-wrap:anywhere}
+
+@media(prefers-reduced-motion:reduce){.stop-avatar{animation:none;transition:none}}

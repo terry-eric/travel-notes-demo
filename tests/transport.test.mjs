@@ -1,0 +1,42 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {routeLocation,routeLeg,directionsUrl} from '../public/transport.js';
+import {handleMapsConfig} from '../server/maps-config.js';
+import {validateDays} from '../server/api.js';
+import {seedDays} from '../public/seed.js';
+test('routes follow reordered stops and do not mistake shared links or renamed activities for locations',()=>{
+ const a={name:'早餐',q:'札幌駅'},b={name:'散步',q:'小樽運河',mode:'transit'},c={name:'午餐',q:'餐廳',mapUrl:'https://maps.app.goo.gl/example'};
+ assert.equal(routeLeg([a,b],1).origin,'札幌駅');
+ assert.equal(routeLeg([b,a],1).origin,'小樽運河');
+ assert.equal(routeLeg([a,c],1).destination,c.q);
+ assert.equal(routeLeg([a,{name:'自訂名稱',mapUrl:c.mapUrl}],1).complete,false);
+ c.routeQuery='北海道小樽市堺町 1-1';assert.equal(routeLeg([a,c],1).destination,c.routeQuery);
+ const leg=routeLeg([a,b],1),embed=new URL(directionsUrl(leg,'transit','test-key'));
+ assert.equal(embed.pathname,'/maps/embed/v1/directions');assert.equal(embed.searchParams.get('origin'),'札幌駅');assert.equal(embed.searchParams.get('mode'),'transit');
+ assert.equal(new URL(directionsUrl(leg,'walking')).searchParams.get('travelmode'),'walking');
+ assert.equal(directionsUrl(routeLeg([a,c],0),'walking'),'');
+ const days=structuredClone(seedDays);days[0].stops[0].routeQuery=c.routeQuery;assert.equal(validateDays(days)[0].stops[0].routeQuery,c.routeQuery);
+});
+test('shared destinations use the same saved location for maps and both route endpoints',()=>{
+ const first={name:'下午休息',q:'銀珈琲店 札幌',mapUrl:'https://maps.app.goo.gl/example'};
+ const second={name:'住宿',q:'搜尋時舊文字',routeQuery:'札幌駅',mapUrl:first.mapUrl};
+ assert.equal(routeLocation(first),'銀珈琲店 札幌');
+ assert.equal(routeLocation(second),'札幌駅');
+ const leg=routeLeg([first,second],1);
+ assert.equal(leg.origin,routeLocation(first));
+ assert.equal(leg.destination,routeLocation(second));
+ assert.equal(leg.complete,true);
+ first.name='任意行程名稱';
+ assert.equal(routeLeg([first,second],1).origin,'銀珈琲店 札幌');
+ const data=structuredClone(seedDays);data[0].stops.push({...first,time:'14:00',tag:'咖啡',desc:'',routeQuery:first.q});
+ const saved=validateDays(data)[0].stops.at(-1);
+ assert.equal(routeLocation(saved),first.q);
+ assert.equal(saved.mapUrl,first.mapUrl);
+});
+test('embed configuration requires a signed in visitor and returns an explicit unconfigured state',async()=>{
+ const env={GOOGLE_MAPS_EMBED_KEY:'test-key'};
+ assert.equal(handleMapsConfig(new Request('https://example.com/api/maps-config'),env).status,401);
+ const req=new Request('https://example.com/api/maps-config',{headers:{'oai-authenticated-user-id':'test'}});
+ assert.deepEqual(await handleMapsConfig(req,{}).json(),{embedKey:''});
+ assert.equal((await handleMapsConfig(req,env).json()).embedKey,'test-key');
+});
