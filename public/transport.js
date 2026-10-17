@@ -13,7 +13,7 @@ export function routeLocation(stop,stops=[],resolved=new Map()){
 }
 export function routeLeg(stops,index,resolved=new Map()){
  const stop=stops[index];if(!stop)return null;
- const origin=index===0?(stop.from||''):routeLocation(stops[index-1],stops,resolved);
+ const origin=index===0?(stop.from||''):(stops[index-1].kind==='flight'?stops[index-1].flight?.arrivalAirport||'':routeLocation(stops[index-1],stops,resolved));
  const destination=routeLocation(stop,stops,resolved);
  return {origin,destination,fromName:index===0?(stop.from||'出發地'):stops[index-1].name,toName:stop.name,mode:stop.mode||'walking',complete:!!(origin&&destination),samePlace:!!origin&&origin===destination};
 }
@@ -34,7 +34,7 @@ export function directionsUrl(leg,mode,key=''){
 // Bind manually entered minutes to this pair of places and transport mode.
 export function legSignature(stops,index){
  const place=s=>s?(routeLocation(s)||s.mapUrl||s.name):'';
- return JSON.stringify([index?place(stops[index-1]):stops[index]?.from||'',place(stops[index]),stops[index]?.mode||'walking']);
+ return JSON.stringify([index?(stops[index-1].kind==='flight'?stops[index-1].flight?.arrivalAirport||'':place(stops[index-1])):stops[index]?.from||'',place(stops[index]),stops[index]?.mode||'walking']);
 }
 export function savedTravelMinutes(stops,index){
  const s=stops[index];

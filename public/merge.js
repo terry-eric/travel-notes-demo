@@ -1,8 +1,8 @@
 import {withStopIds} from './identity.js';
 const equal=(a,b)=>a===b||!!(a&&b&&typeof a==='object'&&typeof b==='object'&&Array.isArray(a)===Array.isArray(b)&&Object.keys(a).length===Object.keys(b).length&&Object.keys(a).every(k=>Object.hasOwn(b,k)&&equal(a[k],b[k])));
-export const fieldLabels={name:'名稱',time:'時間',tag:'標籤',desc:'備註',duration:'停留時間',from:'出發地',live:'固定行程',source:'演出資訊',location:'導航地點',travel:'交通方式與時間',day:'安排日期'};
-const groups={location:['q','routeQuery','placeId','mapUrl'],travel:['mode','travelMinutes','travelSignature']};
-const fields=['name','time','tag','desc','duration','from','live','source','location','travel'];
+export const fieldLabels={name:'名稱',time:'時間',tag:'標籤',desc:'備註',duration:'停留時間',from:'出發地',live:'固定行程',source:'演出資訊',location:'導航地點',travel:'交通方式與時間',flight:'機票',day:'安排日期'};
+const groups={location:['q','routeQuery','placeId','mapUrl','coordinates'],travel:['mode','travelMinutes','travelSignature'],flight:['kind','flight','q','routeQuery','placeId','mapUrl','coordinates']};
+const fields=['name','time','tag','desc','duration','from','live','source','location','travel','flight'];
 const group=(stop,field)=>groups[field]?Object.fromEntries(groups[field].filter(k=>stop?.[k]!==undefined).map(k=>[k,stop[k]])):stop?.[field];
 const records=days=>new Map(days.flatMap((day,d)=>day.stops.map(stop=>[stop.id,{stop,day:d}])));
 const creator=value=>typeof value==='string'&&value.length<=254&&/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim())?value.trim().toLowerCase():'';
@@ -74,7 +74,9 @@ export function mergeTrip(baseDays,mineDays,theirDays,choices={}){
    if(chosen)result.set(id,attributed(chosen,remote||original));continue;
   }
   const stop={id};
+  const flightRelated=[original?.stop,local.stop,remote.stop].some(value=>value?.kind==='flight');
   for(const field of fields){
+   if(flightRelated&&field==='location'||!flightRelated&&field==='flight')continue;
    const value=pick(id+':'+field,fieldLabels[field],name,group(original?.stop,field),group(local.stop,field),group(remote.stop,field));
    if(groups[field])Object.assign(stop,value);else if(value!==undefined)stop[field]=value;
   }
@@ -90,7 +92,8 @@ export function mergeTrip(baseDays,mineDays,theirDays,choices={}){
    conflicts.push({key,label:'行程順序',name:day.date,type:'order',mine:local.map(id=>result.get(id).stop.name),theirs:remote.map(id=>result.get(id).stop.name),resolved:['mine','theirs'].includes(choices[key])});
    order=choices[key]==='mine'?local:remote;
   }
-  return {...day,stops:order.map(id=>result.get(id).stop)};
+  const title=pick('day-title:'+d,'每日名稱',day.date,base[d]?.title,mine[d]?.title,day.title);
+  return {...day,...(title===undefined?{}:{title}),stops:order.map(id=>result.get(id).stop)};
  });
  return {days,conflicts,unresolved:conflicts.filter(c=>!c.resolved)};
 }

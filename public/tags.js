@@ -10,7 +10,7 @@ export const tags = [
  {label:'其他',id:'other'}
 ];
 const aliases = {
- '固定演唱會':'concert','甜點':'cafe','早餐':'food','散步':'sight',
+ '固定演唱會':'concert','甜點':'cafe','早餐':'food','散步':'sight','機票':'transport','航班':'transport',
  '城市風景':'sight','玻璃工藝':'sight','音樂盒':'sight','黃昏散步':'sight',
  'JR 出發':'transport','抵達':'transport','返程':'transport','提早出發':'transport',
  '市區採買':'shopping','伴手禮':'shopping','保留空白':'free','彈性備案':'free'

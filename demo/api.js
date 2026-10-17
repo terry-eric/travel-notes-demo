@@ -1,5 +1,5 @@
 import {calendarDays,cleanDays,cleanState,metadata,text,safeId,DEMO_EMAIL,DAY_MS,dateStamp} from './model.js';
-import {createDemoState} from './seed.js';
+import {createDemoState,hydrateDemoCoordinates} from './seed.js';
 import {locationFromMapsUrl,parseMapsShare} from '../public/maps-link.js';
 import {clearStaleTravel} from '../public/transport.js';
 
@@ -27,7 +27,7 @@ export function createDemoApi({storage,base='',now=Date.now,uuid=()=>crypto.rand
  function load(){
   let raw;try{raw=storage.getItem(key);}catch{throw fault('此瀏覽器無法讀取示範資料。請允許網站儲存空間後重試。',503);}
   if(raw===null||raw===undefined)return save(createDemoState());
-  try{if(typeof raw!=='string'||new TextEncoder().encode(raw).length>MAX_BYTES)throw Error();return cleanState(JSON.parse(raw));}
+  try{if(typeof raw!=='string'||new TextEncoder().encode(raw).length>MAX_BYTES)throw Error();const state=cleanState(JSON.parse(raw));return hydrateDemoCoordinates(state)?save(state):state;}
   catch{recovered=true;return save(createDemoState());}
  }
  function find(state,id,deleted=false){

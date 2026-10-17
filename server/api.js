@@ -1,5 +1,8 @@
 import {parseMapsShare} from '../public/maps-link.js';
 import {withStopIds} from '../public/identity.js';
+import {normalizeCoordinates} from '../public/map-coordinates.js';
+import {sanitizeFlight,flightTripSchedule} from '../public/flights.js';
+import {validateDayName} from '../public/day-names.js';
 import {API_CLIENT,LEGACY_TRIP_ID,LEGACY_OWNER,apiReply,authenticatedEmail,ensureLegacy,tripAccess,requestedTrip,tripMetadata,calendarDays,dateRange,cleanTitle,cleanTimezone,cleanEmail,mutationBody} from './trips.js';
 const text=(v,max,required=false)=>{if(typeof v!=='string'||v.length>max||(required&&!v.trim()))throw Error('請確認欄位內容與長度。');return v.trim();};
 export function validateDays(input,trip={id:LEGACY_TRIP_ID,startDate:'2026-11-11',endDate:'2026-11-15'}){
@@ -20,9 +23,16 @@ export function validateDays(input,trip={id:LEGACY_TRIP_ID,startDate:'2026-11-11
    if(s.routeQuery)out.routeQuery=text(s.routeQuery,300,true);
    if(s.placeId)out.placeId=text(s.placeId,300,true);
    if(s.mapUrl)out.mapUrl=parseMapsShare(text(s.mapUrl,2048,true));
+   if(s.coordinates!==undefined){const point=normalizeCoordinates(s.coordinates);if(!point)throw Error('請填寫有效的景點座標。');out.coordinates=point;}
+   if(s.kind!==undefined&&!['place','flight'].includes(s.kind))throw Error('行程類型不正確。');
+   if(s.kind==='flight'){
+    out.kind='flight';out.flight=sanitizeFlight(s.flight);const schedule=flightTripSchedule(out.flight,trip.timezone||'Asia/Taipei');
+    if(schedule.date!==calendar[i].isoDate)throw Error('航班出發時間換算後不在此行程日期，請調整安排日期。');
+    out.time=schedule.time;out.duration=schedule.duration;out.live=true;out.q=out.flight.departureAirport;out.routeQuery=out.q;
+   }
    return out;
   });
-  return {...calendar[i],stops};
+  return {...calendar[i],title:validateDayName(day.title,i),stops};
  });
 }
 function storedCreator(value){try{return cleanEmail(value);}catch{return null;}}
@@ -61,7 +71,7 @@ async function creatorLedger(db,id,daySets){
 }
 async function rowData(db,row,role){
  const trip=tripMetadata(row),calendar=calendarDays(trip);
- const normalize=payload=>withStopIds(JSON.parse(payload).map((day,i)=>({...calendar[i],stops:day.stops.map(readableStop)})));
+ const normalize=payload=>withStopIds(JSON.parse(payload).map((day,i)=>({...calendar[i],title:validateDayName(day.title,i),stops:day.stops.map(readableStop)})));
  const days=normalize(row.payload),previous=role==='viewer'||!row.previous?null:normalize(row.previous);
  const ledger=await creatorLedger(db,row.id,[days,previous]);
  return {trip,role,days:attributeStops(days,row,null,ledger),previous:previous&&attributeStops(previous,row,null,ledger),revision:row.revision};

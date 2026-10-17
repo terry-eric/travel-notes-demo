@@ -8,10 +8,13 @@ export const demoOutput=path.join(root,'_site');
 export function buildDemo(){
  // The destination is fixed inside this checkout; no backend or environment files enter it.
  fs.mkdirSync(demoOutput,{recursive:true});
- const expected=new Set([...assetNames,'demo','404.html','.nojekyll']);
+ const expected=new Set([...assetNames.map(name=>name.split('/')[0]),'demo','404.html','.nojekyll']);
  for(const entry of fs.readdirSync(demoOutput))if(!expected.has(entry))fs.rmSync(path.join(demoOutput,entry),{recursive:true,force:true});
+ const vendorOutput=path.resolve(demoOutput,'vendor');if(vendorOutput!==path.join(root,'_site','vendor'))throw Error('Invalid vendor output path');
+ fs.rmSync(vendorOutput,{recursive:true,force:true});
  for(const name of assetNames){
   const source=path.join(root,'public',name),destination=path.join(demoOutput,name);
+  fs.mkdirSync(path.dirname(destination),{recursive:true});
   if(name.endsWith('.png')){fs.copyFileSync(source,destination);continue;}
   let text=fs.readFileSync(source,'utf8');
   if(name==='index.html'){

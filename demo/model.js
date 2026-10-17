@@ -1,5 +1,7 @@
 import {parseMapsShare} from '../public/maps-link.js';
 import {withStopIds} from '../public/identity.js';
+import {normalizeCoordinates} from '../public/map-coordinates.js';
+import {sanitizeFlight,flightTripSchedule} from '../public/flights.js';
 
 export const DEMO_VERSION=1;
 export const DEMO_EMAIL='demo-local@example.invalid';
@@ -50,6 +52,9 @@ function cleanStop(value){
   out.mapUrl=url.href;
  }
  if(DEMO_CREATORS.includes(value.createdBy))out.createdBy=value.createdBy;
+ if(value.coordinates!==undefined){const point=normalizeCoordinates(value.coordinates);if(!point)throw Error('請填寫有效的景點座標。');out.coordinates=point;}
+ if(value.kind!==undefined&&!['place','flight'].includes(value.kind))throw Error('行程類型不正確。');
+ if(value.kind==='flight'){out.kind='flight';out.flight=sanitizeFlight(value.flight);out.live=true;}
  return out;
 }
 export function cleanDays(input,trip){
@@ -58,6 +63,7 @@ export function cleanDays(input,trip){
  return withStopIds(input.map((day,index)=>{
   if(!object(day)||!Array.isArray(day.stops)||day.stops.length>100)throw Error('每天最多可安排 100 個行程。');
   const out={...calendar[index],stops:day.stops.map(cleanStop)};
+  for(const stop of out.stops)if(stop.kind==='flight'){const schedule=flightTripSchedule(stop.flight,trip.timezone);if(schedule.date!==out.isoDate)throw Error('航班出發時間換算後不在此行程日期，請調整安排日期。');stop.time=schedule.time;stop.duration=schedule.duration;stop.q=stop.flight.departureAirport;stop.routeQuery=stop.q;}
   for(const [name,max] of [['title',120],['sub',300],['intro',2000],['tip',2000]])if(day[name]!==undefined)out[name]=text(day[name],max);
   for(const name of ['color','tint'])if(day[name]!==undefined){if(typeof day[name]!=='string'||!/^#[a-f0-9]{6}$/i.test(day[name]))throw Error('日期顏色不正確。');out[name]=day[name];}
   return out;

@@ -14,7 +14,7 @@ const assetTypes=Object.fromEntries(assetNames.map(name=>[name,assetType(name)])
 const linkParser=fs.readFileSync('public/maps-link.js','utf8').replaceAll('export function','function');
 const identity=fs.readFileSync('public/identity.js','utf8').replace('export function','function');
 const inlineModule=file=>fs.readFileSync(file,'utf8').replace(/^import .*;\r?\n/gm,'').replace(/^export \{.*\};\r?\n/gm,'').replace(/^export /gm,'');
-const api=linkParser+'\n'+identity+'\n'+inlineModule('server/trips.js')+'\n'+inlineModule('server/api.js')+'\n'+inlineModule('server/sharing.js');
+const api=linkParser+'\n'+identity+'\n'+inlineModule('public/map-coordinates.js')+'\n'+inlineModule('public/flights.js')+'\n'+inlineModule('public/day-names.js')+'\n'+inlineModule('server/trips.js')+'\n'+inlineModule('server/api.js')+'\n'+inlineModule('server/sharing.js');
 const mapsConfig=fs.readFileSync('server/maps-config.js','utf8').replace('export function','function');
 const mapsResolve=fs.readFileSync('server/maps-resolve.js','utf8').replace("import {parseMapsShare,locationFromMapsUrl} from '../public/maps-link.js';",'').replaceAll('export async function','async function');
 const seed=fs.readFileSync('public/seed.js','utf8').replace('export const','const');

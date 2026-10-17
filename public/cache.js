@@ -1,5 +1,7 @@
 import {parseMapsShare} from './maps-link.js';
 import {withStopIds} from './identity.js';
+import {normalizeCoordinates} from './map-coordinates.js';
+import {sanitizeFlight} from './flights.js';
 export const CACHE_VERSION=1;
 export const CACHE_TTL_MS=24*60*60*1000;
 export const CACHE_MAX_TRIPS=20;
@@ -34,6 +36,8 @@ function stop(value){
  for(const name of ['from','routeQuery','placeId'])if(value[name]!==undefined)out[name]=string(value[name],300,true);
  if(value.mapUrl)out.mapUrl=mapsUrl(value.mapUrl);
  if(value.live===true)out.live=true;
+ if(value.coordinates!==undefined){const point=normalizeCoordinates(value.coordinates);if(!point)throw Error('Invalid cache coordinates');out.coordinates=point;}
+ if(value.kind==='flight'){out.kind='flight';out.flight=sanitizeFlight(value.flight);out.live=true;}
  const createdBy=creator(value.createdBy);if(createdBy)out.createdBy=createdBy;
  if(['https://wess.jp/milet/','https://wess.jp/yoasobi/'].includes(value.source))out.source=value.source;
  return out;
