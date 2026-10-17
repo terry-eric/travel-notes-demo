@@ -3,6 +3,15 @@
 @media(max-width:600px){.overview-map{margin-top:22px}.route-map-scope{gap:8px}.route-map-scope label{width:100%}.route-map-scope select{flex:1}.map-page-grid #map-panel{order:-1;position:static}.map-actions{padding-left:0!important;padding-right:0!important}.editor-kind-label select{font-size:16px}.flight-summary-card{font-size:12px}}@media(prefers-reduced-motion:reduce){.route-map-canvas *{scroll-behavior:auto!important}}
 
 /* Times sit on the rail; the bordered card only contains the place or ticket. */
+#editor .editor-retained-fields{display:none!important}
+body:not(.read-only) #board .mini-stop[data-overview-stop-id]{cursor:grab}
+#board.is-overview-reordering .mini-stop{cursor:grabbing}
+#board .overview-drop-target{outline:2px solid var(--green);outline-offset:3px;background:var(--tint,#edf3e9)}
+.mini-stop.reorder-source{opacity:.22}
+.mini-stop.reorder-ghost{position:fixed;z-index:9999;pointer-events:none;display:grid;grid-template-columns:48px minmax(0,1fr);gap:8px;align-items:center;padding:12px;border:1px solid var(--tag-color,var(--line));border-radius:10px;background:#fff;box-shadow:0 14px 32px #203e3730;cursor:grabbing}
+.mini-stop.reorder-ghost strong{overflow-wrap:anywhere}.mini-stop.reorder-ghost .tag{grid-column:2;justify-self:start}
+.overview-drop-marker{position:fixed;z-index:9998;pointer-events:none;height:3px;border-radius:2px;background:var(--green);box-shadow:0 0 0 2px #fff}
+.overview-drop-marker:before{content:'';position:absolute;left:-3px;top:-3px;width:9px;height:9px;border-radius:50%;background:var(--green)}
 .timeline{--timeline-rail:96px;--timeline-gap:16px;position:relative}
 .timeline::before{content:'';position:absolute;left:calc(var(--timeline-rail) + var(--timeline-gap)/2);top:20px;bottom:28px;width:2px;background:#d9e1d8;pointer-events:none}
 .stop[data-reorder-card].timeline-stop{display:grid;grid-template-columns:var(--timeline-rail) minmax(0,1fr);gap:var(--timeline-gap);border:0;border-radius:0;background:transparent;margin:0 0 14px;padding:0;box-shadow:none;min-width:0}

@@ -19,7 +19,7 @@ import {createMapFrame,placeEmbedUrl} from './map-frame.js';
 import {durationParts,durationMinutes,formatDuration} from './duration.js';
 import {tagCategory,tagOptions} from './tags.js';
 import {renderStopAvatar,stopAvatarLabel} from './stop-avatar.js';
-import {initReorder,moveStop} from './reorder.js';
+import {initReorder,initOverviewReorder,moveStop,moveStopBetweenDays} from './reorder.js';
 import {initImport,insertImported} from './import.js';
 const resolvedPlaces=new Map(),placeRequests=new Map(),placeErrors=new Map();
 let transportLoading=false;
@@ -150,6 +150,8 @@ const autoSync=createAutoSync({
 });
 const importer=initImport({canWrite:()=>canChange()&&!transportDirty&&!stayDraft,getScope:scopeSnapshot,onSave:importRows,onChange:persistDraft,onClose:()=>void autoSync.tick()});
 initReorder($('timeline'),{canStart:()=>canChange()&&!transportDirty&&!stayDraft&&!timelineEditorId&&!transportEditorId,onStart:()=>{dragging=true;return {...scopeSnapshot(),day:activeDay};},onFinish:()=>{dragging=false;void autoSync.tick();},onMove:reorderStop});
+function canSortOverview(){return canChange()&&!dragging&&!editorDirty&&!$('editor').open&&!$('import-dialog').open&&!$('transport-dialog').open&&!importer.dirty&&!transportDirty&&!stayDraft&&!timelineEditorId&&!transportEditorId&&!dayNameDraft&&!document.activeElement?.matches('[name="dayName"]');}
+initOverviewReorder($('board'),{canStart:canSortOverview,onStart:()=>{dragging=true;return scopeSnapshot();},onFinish:()=>{dragging=false;void autoSync.tick();},onMove:moveOverviewStop});
 const placeFrame=createMapFrame({getFrame:()=>$('map'),status:$('place-map-status'),isActive:()=>currentPage==='map'});
 const transportFrame=createMapFrame({getFrame:()=>$('transport-map'),status:$('transport-placeholder'),isActive:()=>$('transport-dialog').open});
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -293,7 +295,7 @@ async function resolveConflicts(choices){
 }
 
 function renderBoard(){
- $('board').innerHTML=days.map((d,i)=>`<article class="day-card day-summary" style="--day:${esc(d.color)};--tint:${esc(d.tint)}">${renderDayName(d,i,{canEdit:access.canEdit}).replaceAll("day-name-"+i,"overview-day-name-"+i)}<button class="day-choice" data-open-day="${i}" aria-label="查看第 ${i+1} 天 ${esc(d.date)} 行程"><span class="day-number">第 ${i+1} 天</span><span class="card-date">${esc(d.date)}</span></button><div class="day-items"><div class="card-stops">${d.stops.map((s,j)=>`<button class="mini-stop ${s.live===true?'has-stop-avatar ':''}category-${tagCategory(s.tag)}" data-details="${j}" data-owner="${i}" data-day="${i}" data-stop="${j}" aria-pressed="${activeDay===i&&activeStop===j}"><time>${esc(s.time)}</time><strong>${esc(s.name)}</strong><span class="tag">${esc(s.tag||'其他')}</span>${renderStopAvatar(s)}</button>`).join('')||'<p class="empty">尚未安排行程</p>'}</div><button class="add-day" data-add="${i}" data-write>＋ 新增行程</button></div></article>`).join('');lock();
+ $('board').innerHTML=days.map((d,i)=>`<article class="day-card day-summary" data-overview-day="${i}" style="--day:${esc(d.color)};--tint:${esc(d.tint)}">${renderDayName(d,i,{canEdit:access.canEdit}).replaceAll("day-name-"+i,"overview-day-name-"+i)}<button class="day-choice" data-open-day="${i}" aria-label="查看第 ${i+1} 天 ${esc(d.date)} 行程"><span class="day-number">第 ${i+1} 天</span><span class="card-date">${esc(d.date)}</span></button><div class="day-items"><div class="card-stops">${d.stops.map((s,j)=>`<button class="mini-stop ${s.live===true?'has-stop-avatar ':''}category-${tagCategory(s.tag)}" data-overview-stop-id="${esc(s.id)}" data-details="${j}" data-owner="${i}" data-day="${i}" data-stop="${j}" ${access.canEdit?'title="長按或拖曳調整日期與順序；Alt＋方向鍵也可調整"':''} aria-pressed="${activeDay===i&&activeStop===j}"><time>${esc(s.time)}</time><strong>${esc(s.name)}</strong><span class="tag">${esc(s.tag||'其他')}</span>${renderStopAvatar(s)}</button>`).join('')||'<p class="empty">尚未安排行程</p>'}</div><button class="add-day" data-add="${i}" data-write>＋ 新增行程</button></div></article>`).join('');lock();
 }
 function renderTransportRow(stops,index){
  const draft=transportDirty&&transportDraft?.day===activeDay&&transportDraft.id===stops[index]?.id?transportDraft:null;
@@ -558,6 +560,13 @@ async function reorderStop(id,to,scope={...scopeSnapshot(),day:activeDay}){
  }
  return saved;
 }
+async function moveOverviewStop(id,day,to,scope=scopeSnapshot()){
+ if(!canChange()||editorDirty||transportDirty||stayDraft||dayNameDraft||importer.dirty)return false;
+ let moved;try{moved=moveStopBetweenDays(scope.days,id,day,to);}catch(error){notice(error.message);return false;}
+ const message=(moved.fromDay===day?'已調整行程順序':'已移至 '+(moved.days[day].isoDate||moved.days[day].date))+(moved.cleared?'；路線改變的交通時間已清除，請重新確認。':'')+(moved.changed?' 已重新計算 '+moved.changed+' 個行程時間。':'')+(moved.reason?' '+moved.reason:'');
+ const saved=await commit(moved.days,message,day,to,false,false,scope);
+ if(saved){const card=[...$('board').querySelectorAll('[data-overview-stop-id]')].find(item=>item.dataset.overviewStopId===id);card?.scrollIntoView({block:'nearest',inline:'nearest',behavior:'instant'});card?.focus({preventScroll:true});}return saved;
+}
 async function move(index,step){const to=index+step;if(to<0||to>=days[activeDay].stops.length)return;await reorderStop(days[activeDay].stops[index].id,to);}
 async function importRows(rows,scope){
  if(!canChange())return;
@@ -638,8 +647,10 @@ $('editor-form').addEventListener('submit',async e=>{
  if(stay!==undefined)stop.duration=stay;stop.tag=stop.tag||'行程';stop.time=stop.time||'待安排';
  if(editing)next[editing.day].stops.splice(editing.index,1);
  const index=Math.max(0,Math.min(Number($('field-order').value),next[day].stops.length));
- next[day].stops.splice(index,0,stop);clearStaleTravel(next);
- const shifted=(stay!==original.duration||stop.time!==original.time)&&index+1<next[day].stops.length?pushSchedule(next[day].stops,index+1,{exact:true}):{changed:0,reason:''};
+ next[day].stops.splice(index,0,stop);if(editing&&editing.day!==day){delete stop.travelMinutes;delete stop.travelSignature;}clearStaleTravel(next);
+ const placementChanged=editing&&(editing.day!==day||editing.index!==index),shifted={changed:0,reason:''};
+ const starts=placementChanged?(editing.day===day?[[day,Math.max(1,Math.min(editing.index,index))]]:[[editing.day,Math.max(1,editing.index)],[day,Math.max(1,index)]]):(stay!==original.duration||stop.time!==original.time?[[day,index+1]]:[]);
+ const reasons=new Set();for(const [affected,start] of starts){if(start>=next[affected].stops.length)continue;const result=pushSchedule(next[affected].stops,start,{exact:true});shifted.changed+=result.changed;if(result.reason)reasons.add(result.reason);}shifted.reason=[...reasons].join(' ');
  await commit(next,(editing?'行程已更新':'已新增行程')+(shifted.changed?'，已重新計算 '+shifted.changed+' 個行程':'')+(shifted.reason?'。'+shifted.reason:''),day,index,false,false,editorScope,stop.id);
 });
 function updateTagPreview(){const tag=$('field-tag').value,preview=$('tag-preview');preview.className='tag-preview category-'+tagCategory(tag);preview.querySelector('.tag').textContent=tag;}
