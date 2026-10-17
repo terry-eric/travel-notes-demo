@@ -20,7 +20,7 @@
 @media print{.route-map-fit,.route-map-retry,.route-map-canvas .leaflet-control-zoom{display:none}.route-map-shell{break-inside:avoid}.route-map-canvas{height:400px}}
 
 .daily>.daily-grid{display:grid;grid-template-columns:minmax(390px,1.1fr) minmax(320px,.9fr);gap:28px;max-width:none;align-items:start}
-.daily-content{min-width:0}#daily-map-panel{min-width:0;position:sticky;top:28px}#daily-route-map .route-map-canvas{height:clamp(340px,52dvh,560px)}
+.daily-content{min-width:0}#daily-map-panel{min-width:0;position:sticky;top:96px}#daily-route-map .route-map-canvas{height:clamp(340px,52dvh,560px)}
 @media(max-width:1199px){.daily>.daily-grid{grid-template-columns:minmax(0,1fr);gap:22px}#daily-map-panel{position:static;order:-1}#daily-route-map .route-map-canvas{height:300px}}
 @media(max-width:600px){.daily>.daily-grid{gap:18px}#daily-route-map .route-map-canvas{height:240px}#daily-route-map .route-map-caption{display:none}}
 @media print{.daily>.daily-grid{display:block}#daily-map-panel{position:static;margin-top:24px}}
