@@ -48,7 +48,7 @@ test('signed whitelist members share the owner trip, viewers cannot write, and r
  const key={...await crypto.subtle.exportKey('jwk',pair.publicKey),kid:'sharing-key'};
  const env={...target,DB,ACCESS_ISSUER:'https://trip-sharing-test.cloudflareaccess.com',ACCESS_AUD:'share-aud',OWNER_EMAIL:'owner@example.com'};
  globalThis.fetch=async url=>{assert.equal(url,env.ACCESS_ISSUER+'/cdn-cgi/access/certs');return Response.json({keys:[key]});};
- async function request(path,email,method='GET',body,client='multi-1'){
+ async function request(path,email,method='GET',body,client='multi-2'){
   const payload=encode({alg:'RS256',kid:key.kid})+'.'+encode({iss:env.ACCESS_ISSUER,aud:[env.ACCESS_AUD],email,sub:email,exp:Date.now()/1000+60});
   const sig=await crypto.subtle.sign('RSASSA-PKCS1-v1_5',pair.privateKey,new TextEncoder().encode(payload));
   return worker.fetch(new Request('https://trip.example.com/trip'+path,{method,headers:{'Cf-Access-Jwt-Assertion':payload+'.'+Buffer.from(sig).toString('base64url'),'Content-Type':'application/json',...(client?{'X-Trip-Client':client}:{}),Origin:'https://trip.example.com','oai-authenticated-user-id':'spoofed-user'},body:body?JSON.stringify(body):undefined}),env);

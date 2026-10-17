@@ -1,7 +1,7 @@
 import {seedDays} from '../public/seed.js';
 export const LEGACY_TRIP_ID='legacy-hokkaido-2026';
 export const LEGACY_OWNER='owner@example.com';
-export const API_CLIENT='multi-1';
+export const API_CLIENT='multi-2';
 export const apiReply=(body,status=200)=>Response.json(body,{status,headers:{'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'}});
 export function cleanEmail(value){
  if(typeof value!=='string'||value.length>254||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim()))throw Error('請填寫有效的 email。');

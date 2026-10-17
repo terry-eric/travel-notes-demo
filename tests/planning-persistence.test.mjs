@@ -17,7 +17,7 @@ const origin='https://planner.example',email='planner@example.com';
 const flightDetails={airline:'示範航空',number:'DEMO116',departureAirport:'桃園 TPE',arrivalAirport:'新千歲 CTS',departureDateTime:'2027-04-12T10:00',arrivalDateTime:'2027-04-12T14:45',departureTimezone:'Asia/Taipei',arrivalTimezone:'Asia/Tokyo',bookingReference:'DEMO123'};
 const metadata={title:'機票與地點的儲存示範',startDate:'2027-04-12',endDate:'2027-04-12',timezone:'Asia/Tokyo'};
 function memory(){const data=new Map();return {data,get length(){return data.size;},key:index=>[...data.keys()][index]??null,getItem:key=>data.get(key)??null,setItem:(key,value)=>data.set(key,String(value)),removeItem:key=>data.delete(key)};}
-function request(endpoint,method='GET',body){return new Request(origin+endpoint,{method,headers:{Origin:origin,'oai-authenticated-user-id':email,'Content-Type':'application/json','X-Trip-Client':'multi-1'},...(body===undefined?{}:{body:JSON.stringify(body)})});}
+function request(endpoint,method='GET',body){return new Request(origin+endpoint,{method,headers:{Origin:origin,'oai-authenticated-user-id':email,'Content-Type':'application/json','X-Trip-Client':'multi-2'},...(body===undefined?{}:{body:JSON.stringify(body)})});}
 const plannedStops=()=>[
  {id:'flight-one',kind:'flight',name:'出發航班',time:'11:00',q:flightDetails.departureAirport,routeQuery:flightDetails.departureAirport,tag:'機票',desc:'示範票券',mode:'transit',live:true,duration:225,coordinates:{lat:25.0797,lng:121.2342},flight:flightDetails},
  {id:'hotel-one',name:'住宿',time:'16:00',q:'札幌車站',tag:'住宿',desc:'',mode:'transit',duration:30,coordinates:{lat:43.0687,lng:141.3508}},

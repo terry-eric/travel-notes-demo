@@ -72,7 +72,7 @@ test('route changes clear stale minutes and subsequent schedule checks preserve 
 });
 
 test('a real stale save merges against the latest authenticated database snapshot',async()=>{
- const DB=localDatabase(),request=(body)=>new Request('https://trip.example/api/trip',{method:body?'PUT':'GET',headers:{'oai-authenticated-user-id':'owner@example.com','Content-Type':'application/json',Origin:'https://trip.example','X-Trip-Client':'multi-1'},body:body?JSON.stringify(body):undefined});
+ const DB=localDatabase(),request=(body)=>new Request('https://trip.example/api/trip',{method:body?'PUT':'GET',headers:{'oai-authenticated-user-id':'owner@example.com','Content-Type':'application/json',Origin:'https://trip.example','X-Trip-Client':'multi-2'},body:body?JSON.stringify(body):undefined});
  try{
   const initial=await(await handleApi(request(),{DB})).json(),mine=clone(initial.days),theirs=clone(initial.days);mine[0].stops[0].desc='My edit';theirs[1].stops[0].name='Their edit';
   await handleApi(request({days:theirs,revision:0,mutationId:'first'}),{DB});assert.equal((await handleApi(request({days:mine,revision:0,mutationId:'stale'}),{DB})).status,409);

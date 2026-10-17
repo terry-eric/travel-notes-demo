@@ -77,7 +77,7 @@ test('typing survives background catalogue and selected-trip renders with cursor
 test('rename success updates only the selected metadata and never elevates other trip roles or snapshot revision',async t=>{
  const days=[{stops:[{id:'keep-stop',name:'保留行程'}]}],snapshot={trip:trip(),revision:4,days,previous:{undo:'keep'}};
  const h=harness(t,{snapshot});await h.load([trip(),trip('viewer','viewer',1),trip('editor','editor',2)]);h.manager.setCurrent(trip());h.manager.openRename('owner-trip');await h.type('新的旅行名稱');await h.submit();
- const request=h.requests[1];assert.equal(request.options.method,'PATCH');assert.equal(request.options.headers['X-Trip-Client'],'multi-1');
+ const request=h.requests[1];assert.equal(request.options.method,'PATCH');assert.equal(request.options.headers['X-Trip-Client'],'multi-2');
  const body=JSON.parse(request.options.body);assert.equal(body.baseTitle,'旅行 owner-trip');assert.equal(body.revision,5);assert.equal(body.title,'新的旅行名稱');assert.ok(body.mutationId);
  request.resolve(result('新的旅行名稱',8));await settle();
  assert.equal(h.input(),undefined);assert.equal(h.manager.pending,false);assert.equal(h.manager.dirty,false);assert.equal(h.$('trip-current-title').textContent,'新的旅行名稱');

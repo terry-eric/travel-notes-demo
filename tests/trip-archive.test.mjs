@@ -5,7 +5,7 @@ import {handleSharing} from '../server/sharing.js';
 import {sessionFor,LEGACY_TRIP_ID,ensureLegacy} from '../server/trips.js';
 import {localDatabase} from '../scripts/local-db.mjs';
 const origin='https://trip.example',legacyOwner='owner@example.com',alice='alice@example.com',bob='bob@example.com',viewer='viewer@example.com',revoked='revoked@example.com';
-const request=(path,method='GET',body,email=alice,extra={})=>new Request(origin+path,{method,headers:{'oai-authenticated-user-id':email,Origin:origin,'Content-Type':'application/json','X-Trip-Client':'multi-1',...extra},body:body===undefined?undefined:JSON.stringify(body)});
+const request=(path,method='GET',body,email=alice,extra={})=>new Request(origin+path,{method,headers:{'oai-authenticated-user-id':email,Origin:origin,'Content-Type':'application/json','X-Trip-Client':'multi-2',...extra},body:body===undefined?undefined:JSON.stringify(body)});
 const tripPath=id=>'/api/trip?trip='+id,sharePath=id=>'/api/shares?trip='+id;
 const bodyFor=(extra={})=>({creationId:crypto.randomUUID(),title:'我的旅行',startDate:'2028-01-01',endDate:'2028-01-02',...extra});
 async function create(env,body=bodyFor(),email=alice){const response=await handleTrips(request('/api/trips','POST',body,email),env);assert.equal(response.status,201);return response.json();}

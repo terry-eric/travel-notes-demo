@@ -80,7 +80,7 @@ test('new AI stops insert before clock-prefixed anchors while preserving earlier
 });
 
 test('AI dates, notes, labels, stays and modes survive one atomic cloud save and undo snapshot',async()=>{
- const DB=localDatabase();const request=body=>new Request('https://trip.example/api/trip',{method:body?'PUT':'GET',headers:{'oai-authenticated-user-id':'owner@example.com','Content-Type':'application/json',Origin:'https://trip.example','X-Trip-Client':'multi-1'},body:body?JSON.stringify(body):undefined});
+ const DB=localDatabase();const request=body=>new Request('https://trip.example/api/trip',{method:body?'PUT':'GET',headers:{'oai-authenticated-user-id':'owner@example.com','Content-Type':'application/json',Origin:'https://trip.example','X-Trip-Client':'multi-2'},body:body?JSON.stringify(body):undefined});
  try{
   const base=(await(await handleApi(request(),{DB})).json()).days;
   const rows=parseGptImport(document([entry({fixed:true}),entry({date:'2026-11-14',time:'09:15',name:'買早餐',tag:'用餐',mode:'walking',durationMinutes:0})]),base).map((row,i)=>({...row,id:'gpt-cloud-'+i}));

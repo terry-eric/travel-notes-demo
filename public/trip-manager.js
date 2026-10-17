@@ -266,7 +266,7 @@ export function initTripManager({apiPath,readJson,onSelect,onDelete=()=>{},onRen
   body.mutationId=renameDraft.attempt.id;
   const epoch=stateEpoch;invalidateFlight();setPending(true);renameDraft.error='';status('正在儲存旅行名稱…');
   try{
-   const data=await request({method:'PATCH',headers:{'Content-Type':'application/json','X-Trip-Client':'multi-1'},body:JSON.stringify(body)});
+   const data=await request({method:'PATCH',headers:{'Content-Type':'application/json','X-Trip-Client':'multi-2'},body:JSON.stringify(body)});
    if(epoch!==stateEpoch)return;
    const result=renameMetadata(data,body.id);
    if(data?.ok!==true||!result||!['owner','editor'].includes(result.role))throw Error('名稱已送出，但回應不完整。請重試或重新載入確認。');
@@ -297,7 +297,7 @@ export function initTripManager({apiPath,readJson,onSelect,onDelete=()=>{},onRen
   const epoch=stateEpoch;invalidateFlight();
   setPending(true);status(action==='delete'?'正在刪除旅行…':'正在恢復旅行…');
   try{
-   const data=await request({method:action==='delete'?'DELETE':'PUT',headers:{'Content-Type':'application/json','X-Trip-Client':'multi-1'},body:JSON.stringify(body)});
+   const data=await request({method:action==='delete'?'DELETE':'PUT',headers:{'Content-Type':'application/json','X-Trip-Client':'multi-2'},body:JSON.stringify(body)});
    if(epoch!==stateEpoch)return;
    if(data?.ok!==true||data.id!==trip.id)throw Error('操作回應不完整，請重新載入清單確認。');
    const wasCurrent=action==='delete'&&currentId===trip.id;
@@ -369,7 +369,7 @@ export function initTripManager({apiPath,readJson,onSelect,onDelete=()=>{},onRen
   const epoch=stateEpoch;let created=false;invalidateFlight();
   setPending(true);$('trip-create-error').textContent='';status('正在建立旅行…');
   try{
-   const data=await request({method:'POST',headers:{'Content-Type':'application/json','X-Trip-Client':'multi-1'},body:JSON.stringify({...input,creationId:creationAttempt.id})});
+   const data=await request({method:'POST',headers:{'Content-Type':'application/json','X-Trip-Client':'multi-2'},body:JSON.stringify({...input,creationId:creationAttempt.id})});
    if(epoch!==stateEpoch)return;
    if(!data?.trip?.id)throw Error('旅行已送出，但回應不完整，請重新載入清單確認。');
    creationAttempt=null;createDirty=false;created=true;catalogueLoadedAt=null;

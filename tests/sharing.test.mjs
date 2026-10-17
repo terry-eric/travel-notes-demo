@@ -4,7 +4,7 @@ import {localDatabase} from '../scripts/local-db.mjs';
 import {handleSharing,memberRole,sessionInfo} from '../server/sharing.js';
 import {readCloudJson} from '../public/cloud.js';
 const owner='owner@example.com',origin='https://trip.example.com';
-const req=(method='GET',body,from=origin,email=owner)=>new Request(origin+'/trip/api/shares',{method,headers:{Origin:from,'Content-Type':'application/json','oai-authenticated-user-id':email,'X-Trip-Client':'multi-1'},body:body?JSON.stringify(body):undefined});
+const req=(method='GET',body,from=origin,email=owner)=>new Request(origin+'/trip/api/shares',{method,headers:{Origin:from,'Content-Type':'application/json','oai-authenticated-user-id':email,'X-Trip-Client':'multi-2'},body:body?JSON.stringify(body):undefined});
 test('only owner manages whitelist; role changes and revocation take effect immediately',async()=>{
  const DB=localDatabase(),env={DB,OWNER_EMAIL:owner},admin=sessionInfo(owner,'owner');
  try{

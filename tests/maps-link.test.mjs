@@ -15,7 +15,7 @@ test('accepts shared text, short links and place links while rejecting other des
 
 test('shared place link survives reload, renaming and undo without any Places key',async()=>{
  const DB=localDatabase();
- const req=body=>new Request('https://trip.example/api/trip',{method:body?'PUT':'GET',headers:{'oai-authenticated-user-id':'owner@example.com','Content-Type':'application/json',Origin:'https://trip.example','X-Trip-Client':'multi-1'},body:body?JSON.stringify(body):undefined});
+ const req=body=>new Request('https://trip.example/api/trip',{method:body?'PUT':'GET',headers:{'oai-authenticated-user-id':'owner@example.com','Content-Type':'application/json',Origin:'https://trip.example','X-Trip-Client':'multi-2'},body:body?JSON.stringify(body):undefined});
  try{
  const days=structuredClone(seedDays);days[0].stops.push({name:'下午咖啡',mapUrl:'https://maps.app.goo.gl/abc123',q:'',desc:'靠窗座位'});
  let response=await handleApi(req({days,revision:0,mutationId:'share'}),{DB});assert.equal(response.status,200);

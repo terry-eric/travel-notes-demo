@@ -4,7 +4,7 @@ import {handleApi,handleTrips} from '../server/api.js';
 import {handleSharing} from '../server/sharing.js';
 import {localDatabase} from '../scripts/local-db.mjs';
 const origin='https://trip.example',owner='alice@example.com',editor='editor@example.com',viewer='viewer@example.com',legacy='owner@example.com';
-const request=(path,method='GET',body,email=owner,extra={})=>new Request(origin+path,{method,headers:{'oai-authenticated-user-id':email,Origin:origin,'Content-Type':'application/json','X-Trip-Client':'multi-1',...extra},body:body===undefined?undefined:JSON.stringify(body)});
+const request=(path,method='GET',body,email=owner,extra={})=>new Request(origin+path,{method,headers:{'oai-authenticated-user-id':email,Origin:origin,'Content-Type':'application/json','X-Trip-Client':'multi-2',...extra},body:body===undefined?undefined:JSON.stringify(body)});
 const tripPath=id=>'/api/trip?trip='+id;
 async function create(env,email=owner){const response=await handleTrips(request('/api/trips','POST',{title:'原始旅程',startDate:'2028-01-01',endDate:'2028-01-02'},email),env);assert.equal(response.status,201);return response.json();}
 const rename=(env,id,title='新的旅行名稱',baseTitle='原始旅程',revision=0,mutationId='rename-one',email=owner)=>handleTrips(request('/api/trips','PATCH',{id,title,baseTitle,revision,mutationId},email),env);

@@ -62,7 +62,7 @@ test('API validation preserves only custom names while the calendar stays author
 const origin = 'https://trip.example', owner = 'owner@example.com', viewer = 'viewer@example.com';
 function request(path, method = 'GET', body, email = owner) {
  return new Request(origin + path, {
-  method, headers: { 'oai-authenticated-user-id': email, Origin: origin, 'Content-Type': 'application/json', 'X-Trip-Client': 'multi-1' },
+  method, headers: { 'oai-authenticated-user-id': email, Origin: origin, 'Content-Type': 'application/json', 'X-Trip-Client': 'multi-2' },
   body: body === undefined ? undefined : JSON.stringify(body),
  });
 }

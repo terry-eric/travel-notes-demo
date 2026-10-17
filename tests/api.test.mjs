@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 const origin='https://trip.example',owner='owner@example.com',alice='alice@example.com',bob='bob@example.com';
-function request(path='/api/trip',method='GET',body,email=owner,overrides={}){return new Request(origin+path,{method,headers:{...(email?{'oai-authenticated-user-id':email}:{}),Origin:origin,'Content-Type':'application/json','X-Trip-Client':'multi-1',...overrides},body:body===undefined?undefined:JSON.stringify(body)});}
+function request(path='/api/trip',method='GET',body,email=owner,overrides={}){return new Request(origin+path,{method,headers:{...(email?{'oai-authenticated-user-id':email}:{}),Origin:origin,'Content-Type':'application/json','X-Trip-Client':'multi-2',...overrides},body:body===undefined?undefined:JSON.stringify(body)});}
 const endpoint=id=>'/api/trip?trip='+id;
 const shares=id=>'/api/shares?trip='+id;
 async function create(env,email,title='新旅行',startDate='2027-12-30',endDate='2028-01-02',more={}){const response=await handleTrips(request('/api/trips','POST',{title,startDate,endDate,...more},email),env);assert.equal(response.status,201);return response.json();}

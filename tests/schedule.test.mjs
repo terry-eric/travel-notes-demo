@@ -34,7 +34,7 @@ test('manual travel survives server save/reload and undo; invalid minutes are re
  assert.equal(validateDays(days)[1].stops[1].travelMinutes,6);
  for(const bad of [-1,1.5,1441,'6',null]){const invalid=structuredClone(days);invalid[1].stops[1].travelMinutes=bad;assert.throws(()=>validateDays(invalid));}
  const DB=localDatabase();
- const request=(body)=>new Request('https://trip.example/api/trip',{method:body?'PUT':'GET',headers:{'oai-authenticated-user-id':'owner@example.com','Content-Type':'application/json',Origin:'https://trip.example','X-Trip-Client':'multi-1'},body:body?JSON.stringify(body):undefined});
+ const request=(body)=>new Request('https://trip.example/api/trip',{method:body?'PUT':'GET',headers:{'oai-authenticated-user-id':'owner@example.com','Content-Type':'application/json',Origin:'https://trip.example','X-Trip-Client':'multi-2'},body:body?JSON.stringify(body):undefined});
  try{
   const saved=await(await handleApi(request({days,revision:0,mutationId:'manual-1'}),{DB})).json();
   const loaded=await(await handleApi(request(),{DB})).json();assert.equal(savedTravelMinutes(loaded.days[1].stops,1),6);assert.equal(loaded.days[1].stops[1].time,'11:06');

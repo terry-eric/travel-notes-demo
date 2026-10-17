@@ -22,7 +22,7 @@ export function initSharing(){
  }
  async function change(email,role,enabled){
   if(pending||!session.canShare)return;pending=true;lock();$('share-status').textContent='正在儲存…';
-  try{await request({method:'PUT',headers:{'Content-Type':'application/json','X-Trip-Client':'multi-1'},body:JSON.stringify({email,role,enabled})});await load();$('share-status').textContent=enabled?'已更新邀請名單。':'已移除，此帳號無法再讀取行程。';if(enabled)$('share-form').reset();}
+  try{await request({method:'PUT',headers:{'Content-Type':'application/json','X-Trip-Client':'multi-2'},body:JSON.stringify({email,role,enabled})});await load();$('share-status').textContent=enabled?'已更新邀請名單。':'已移除，此帳號無法再讀取行程。';if(enabled)$('share-form').reset();}
   catch(e){$('share-status').textContent=e.message;}finally{pending=false;lock();}
  }
  $('sharing-open').addEventListener('click',async()=>{

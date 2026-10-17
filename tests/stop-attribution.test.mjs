@@ -9,7 +9,7 @@ import {handleSharing} from '../server/sharing.js';
 import {localDatabase} from '../scripts/local-db.mjs';
 import {LEGACY_TRIP_ID} from '../server/trips.js';
 const origin='https://trip.example',owner='alice@example.com',editor='bob@example.com',legacy='owner@example.com';
-const request=(pathname,method='GET',body,email=owner)=>new Request(origin+pathname,{method,headers:{'oai-authenticated-user-id':email,Origin:origin,'Content-Type':'application/json','X-Trip-Client':'multi-1'},body:body===undefined?undefined:JSON.stringify(body)});
+const request=(pathname,method='GET',body,email=owner)=>new Request(origin+pathname,{method,headers:{'oai-authenticated-user-id':email,Origin:origin,'Content-Type':'application/json','X-Trip-Client':'multi-2'},body:body===undefined?undefined:JSON.stringify(body)});
 const tripPath=id=>'/api/trip?trip='+id;
 const stop=(id,name=id,more={})=>({id,name,time:'09:00',...more});
 async function create(env,email=owner){const response=await handleTrips(request('/api/trips','POST',{title:'旅行',startDate:'2028-01-01',endDate:'2028-01-02'},email),env);assert.equal(response.status,201);return response.json();}
