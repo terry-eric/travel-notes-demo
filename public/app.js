@@ -4,11 +4,11 @@ import {initSharing} from './sharing.js';
 import {parseMapsShare} from './maps-link.js';
 import {mountRouteMap} from './route-map.js';
 import {getStopCoordinates,normalizeCoordinates} from './map-coordinates.js';
-import {sanitizeFlight,flightTripSchedule,formatFlightSummary,flightFieldsHtml} from './flights.js';
+import {sanitizeFlight,flightTripSchedule,formatFlightSummary,flightFieldsHtml,flightDuration} from './flights.js';
 import {renderDayName,renameDay} from './day-names.js';
 import {readRoute,routeUrl,boundedSelection} from './routes.js';
-import {routeLocation,routeLeg,directionsUrl,savedTravelMinutes,clearStaleTravel,pushSchedule} from './transport.js';
-import {transportIcons,renderInlineTransportRow,applyManualTransport} from './inline-transport.js';
+import {routeLocation,routeLeg,directionsUrl,savedTravelMinutes,clearStaleTravel,pushSchedule,clockMinutes} from './transport.js';
+import {transportIcons,renderInlineTransportRow,applyManualTransport,applyTimelineTime} from './inline-transport.js';
 import {readCloudJson,fetchEmbedConfig,fetchTripUpdate,loadVerifiedTripSnapshot} from './cloud.js';
 import {createTravelCache} from './cache.js';
 import {createAutoSync} from './sync.js';
@@ -23,7 +23,7 @@ import {initReorder,moveStop} from './reorder.js';
 import {initImport,insertImported} from './import.js';
 const resolvedPlaces=new Map(),placeRequests=new Map(),placeErrors=new Map();
 let transportLoading=false;
-let routeMap=null,overviewMap=null,routeMapScope="day",dayNameDraft=null;
+let routeMap=null,overviewMap=null,dailyRouteMap=null,routeMapScope="day",dayNameDraft=null;
 let embedKey='',embedState='loading',embedRequest=null,authExpired=false,transportIndex=0,transportMode='walking';
 let days=[],currentTrip=null,previous=null,revision=0,ready=false,busy=false,editing=null,pending=null,conflict=false;
 let access={canEdit:false,canShare:false};
@@ -32,7 +32,7 @@ let renameSyncNeeded=false;
 const sessionChannel=typeof BroadcastChannel==='function'?new BroadcastChannel('trip-session:'+appBase):null;
 const tripId=selectedTripId;
 let editorScope=null,editorDirty=false,newStopId='',transportScope=null,transportDirty=false,stayDraft=null,draftStore=null,recovery=null;
-let transportDraft=null;
+let transportDraft=null,transportEditorId='',timelineEditorId='';
 const initialRoute=readRoute(location.href);
 let activeDay=initialRoute.day,activeStop=initialRoute.stop,currentPage=initialRoute.page;
 let editorReadOnly=false,dragging=false;
@@ -50,7 +50,18 @@ function scopeSnapshot(){return {tripId,trip:currentTrip,days:structuredClone(da
 function applyTripRole(role){
  if(!['owner','editor','viewer'].includes(role)||role===access.role)return;
  access={...access,role,canEdit:role!=='viewer',canShare:role==='owner'};sharing.setSession(access);tripManager.setSession(access);
- if(!access.canEdit)persistDraft();showPage(currentPage,{record:false,focus:false});setDay(activeDay,activeStop);lock();
+ if(!access.canEdit){
+  persistDraft();
+  if(editorDirty||transportDirty||stayDraft||dayNameDraft||importer.dirty||pending||conflict){
+   recovery=draftStore?.read()||recovery;
+   editorDirty=transportDirty=false;editorScope=transportScope=null;transportDraft=null;stayDraft=null;dayNameDraft=null;editing=null;pending=null;conflict=false;
+   if($('import-dialog').open)importer.close();
+   for(const id of ['editor','transport-dialog','conflict-dialog'])if($(id).open)$(id).close();
+   $('draft-recovery').hidden=!recovery;
+  }
+  transportEditorId='';timelineEditorId='';
+ }
+ showPage(currentPage,{record:false,focus:false});setDay(activeDay,activeStop);lock();
  notice(access.canEdit?'你的行程權限已更新，可以一起編輯。':'權限已改成只能查看，未儲存的草稿保留在這個裝置。');
 }
 function canSwitchTrip(){return !busy&&!pending&&!conflict&&!dragging&&!editorDirty&&!transportDirty&&!stayDraft&&!dayNameDraft&&!importer.dirty&&!recovery;}
@@ -72,7 +83,7 @@ function restorePlaces(){
 }
 function forgetAccount(){
  identityEpoch++;renameSyncNeeded=false;travelCache?.clearAccount();clearUnavailableTrip();tripManager.clear();travelCache=null;
- draftStore=null;recovery=null;editorDirty=transportDirty=false;editorScope=transportScope=null;transportDraft=null;editing=null;stayDraft=null;dayNameDraft=null;pending=null;conflict=false;
+ draftStore=null;recovery=null;editorDirty=transportDirty=false;editorScope=transportScope=null;transportDraft=null;transportEditorId='';timelineEditorId='';editing=null;stayDraft=null;dayNameDraft=null;pending=null;conflict=false;
  if($('import-dialog').open)importer.close();for(const id of ['editor','transport-dialog','conflict-dialog'])if($(id).open)$(id).close();$('draft-recovery').hidden=true;
  access={canEdit:false,canShare:false};cacheEmail='';embedKey='';embedState='auth';resolvedPlaces.clear();placeErrors.clear();placeRequests.clear();busy=false;lock();
 }
@@ -122,7 +133,7 @@ async function bootAccount(epoch){
 const conflictUI=initConflicts({onResolve:resolveConflicts,onLater:persistDraft,onChoice:choices=>{if(pending?.merge){pending.merge.choices=choices;persistDraft();}}});
 let syncInterrupted=false;
 const autoSync=createAutoSync({
- getState:()=>({ready,busy:busy||tripManager.pending,pending,conflict,revision,editing:dragging||!!dayNameDraft||$('editor').open||$('import-dialog').open||$('transport-dialog').open||transportDirty||!!stayDraft}),
+ getState:()=>({ready,busy:busy||tripManager.pending,pending,conflict,revision,editing:dragging||!!dayNameDraft||document.activeElement?.matches('[name="dayName"]')||!!transportEditorId||!!timelineEditorId||$('editor').open||$('import-dialog').open||$('transport-dialog').open||transportDirty||!!stayDraft}),
  async fetchSnapshot(version){
   const epoch=identityEpoch,permissions=permissionEpoch,isCurrent=()=>epoch===identityEpoch&&permissions===permissionEpoch;
   try{return await fetchTripUpdate(version,fetch,applyTripRole,isCurrent);}catch(error){if(isCurrent())throw error;return null;}
@@ -137,8 +148,8 @@ const autoSync=createAutoSync({
   else $('save-status').textContent='同步暫時中斷，將自動重試';
  }
 });
-const importer=initImport({canWrite:()=>canChange()&&!transportDirty,getScope:scopeSnapshot,onSave:importRows,onChange:persistDraft,onClose:()=>void autoSync.tick()});
-initReorder($('timeline'),{canStart:()=>canChange()&&!transportDirty,onStart:()=>{dragging=true;return {...scopeSnapshot(),day:activeDay};},onFinish:()=>{dragging=false;void autoSync.tick();},onMove:reorderStop});
+const importer=initImport({canWrite:()=>canChange()&&!transportDirty&&!stayDraft,getScope:scopeSnapshot,onSave:importRows,onChange:persistDraft,onClose:()=>void autoSync.tick()});
+initReorder($('timeline'),{canStart:()=>canChange()&&!transportDirty&&!stayDraft&&!timelineEditorId&&!transportEditorId,onStart:()=>{dragging=true;return {...scopeSnapshot(),day:activeDay};},onFinish:()=>{dragging=false;void autoSync.tick();},onMove:reorderStop});
 const placeFrame=createMapFrame({getFrame:()=>$('map'),status:$('place-map-status'),isActive:()=>currentPage==='map'});
 const transportFrame=createMapFrame({getFrame:()=>$('transport-map'),status:$('transport-placeholder'),isActive:()=>$('transport-dialog').open});
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -174,6 +185,8 @@ function readStay(form){return durationMinutes(form.elements.durationHours.value
 const pageLabels={trips:'我的旅行',overview:'行程總覽',daily:'每日行程',map:'旅途地圖',notes:'出發前筆記'};
 function showPage(page,{record=true,focus=true}={}){
  if(dayNameDraft&&!restoringDraft&&page!==currentPage){notice('請先儲存或取消每日名稱。');return;}
+ if(stayDraft&&!restoringDraft&&page!==currentPage){notice('請先完成或取消時間編輯。');return;}
+ if(page!==currentPage&&!transportDirty){transportEditorId='';timelineEditorId='';}
  currentPage=Object.hasOwn(pageLabels,page)?page:'overview';
  document.body.dataset.page=currentPage;
  for(const [key,id] of Object.entries({trips:'trips-panel',overview:'overview',daily:'daily',map:'map-page',notes:'before'}))$(id).hidden=key!==currentPage;
@@ -185,7 +198,7 @@ function showPage(page,{record=true,focus=true}={}){
  const canEdit=access.canEdit&&['overview','daily','map'].includes(currentPage);
  for(const id of ['undo','toolbar-add','import-open','gpt-import-open'])$(id).hidden=!canEdit;
  $('sharing-open').hidden=currentPage==='trips'||(demoMode?!access.canEdit:!access.canShare);
- $('trip-photo-credit').hidden=true;$('trip-footer-note').hidden=currentPage==='trips';
+ $('trip-photo-credit').hidden=currentPage==='trips'||currentTrip?.id!=='legacy-hokkaido-2026';$('trip-footer-note').hidden=currentPage==='trips';
  const url=routeUrl(currentPage,activeDay,activeStop);
  if(record&&location.pathname+location.search+location.hash!==url)history.pushState(null,'',url);
  selectStop(activeStop);
@@ -194,9 +207,11 @@ function showPage(page,{record=true,focus=true}={}){
 }
 function mapStops(all=false){return days.flatMap((day,d)=>!all&&d!==activeDay?[]:day.stops.map((stop,index)=>({...stop,dayIndex:d,stopIndex:index,dayLabel:day.title||'第 '+(d+1)+' 天',date:day.isoDate||day.date})));}
 function renderRouteMaps(){
- const select=stop=>{if(dayNameDraft||transportDirty||busy)return;setDay(stop.dayIndex,stop.stopIndex);showPage('map',{focus:false});};
+ const selectionLocked=()=>!!dayNameDraft||transportDirty||!!stayDraft||editorDirty||importer.dirty||busy||!!pending||conflict;
+ const select=stop=>{if(selectionLocked()){renderRouteMaps();return;}setDay(stop.dayIndex,stop.stopIndex);showPage('map',{focus:false});};
  if(currentPage==='overview'&&days.length){const options={stops:mapStops(true),selectedId:days[activeDay]?.stops[activeStop]?.id,onSelect:select};overviewMap?overviewMap.update(options):overviewMap=mountRouteMap($('overview-route-map'),options);overviewMap.setVisible(true);}else overviewMap?.setVisible(false);
  if(currentPage==='map'&&days.length){const options={stops:mapStops(routeMapScope==='trip'),selectedId:days[activeDay]?.stops[activeStop]?.id,onSelect:select};routeMap?routeMap.update(options):routeMap=mountRouteMap($('itinerary-route-map'),options);routeMap.setVisible(true);}else routeMap?.setVisible(false);
+ if(currentPage==='daily'&&days.length&&$('daily-route-map')){const options={stops:mapStops(false),selectedId:days[activeDay]?.stops[activeStop]?.id,onSelect:stop=>{if(selectionLocked()){renderRouteMaps();return;}selectStop(stop.stopIndex);$('timeline').querySelector(`[data-stop-id="${stop.id}"]`)?.focus({preventScroll:true});}};dailyRouteMap?dailyRouteMap.update(options):dailyRouteMap=mountRouteMap($('daily-route-map'),options);dailyRouteMap.setVisible(true);}else dailyRouteMap?.setVisible(false);
 }
 function renderMapStops(){
  renderDateTabs('map-day-tabs','map-tab','map-day-panel');
@@ -231,7 +246,7 @@ function lock(){
  document.querySelectorAll('[data-close]').forEach(el=>el.disabled=busy);
  $('retry').disabled=busy;$('conflict-submit').disabled=busy;$('conflict-later').disabled=busy;
  $('draft-restore').disabled=!access.canEdit||!ready||busy||!recovery;$('draft-discard').disabled=busy;
- importer.lock(busy||!!pending||conflict||!!recovery);lockTransport();lockDayNames();updateFlightEditor();
+ importer.lock(busy||!!pending||conflict||!!recovery||!!stayDraft);lockTransport();lockTimeline();lockDayNames();updateFlightEditor();
 }
 function bindDraftStore(){
  let storage,tabId;
@@ -256,7 +271,7 @@ function persistDraft(){
 }
 function restoreStayInputs(){
  if(!stayDraft)return;
- for(const [id,value] of Object.entries(stayDraft.values)){const index=days[activeDay].stops.findIndex(s=>s.id===id);if(index<0)continue;const form=$('timeline').querySelector(`[data-stay-form="${index}"]`);if(form){form.elements.durationHours.value=value.hours;form.elements.durationMinutes.value=value.minutes;}}
+ for(const [id,value] of Object.entries(stayDraft.values)){const index=days[activeDay].stops.findIndex(s=>s.id===id);if(index<0)continue;const form=$('timeline').querySelector(`[data-stay-form="${index}"]`);if(form){form.elements.durationHours.value=value.hours;form.elements.durationMinutes.value=value.minutes;if(value.time!==undefined)form.elements.time.value=value.time;}}
 }
 function showConflicts(){if(pending?.merge){const m=pending.merge;conflictUI.show(mergeTrip(pending.base,pending.days,m.remote.days,m.choices).conflicts,m.choices);}}
 function mergedSchedule(candidate,remote){
@@ -265,8 +280,8 @@ function mergedSchedule(candidate,remote){
  const prior=new Map(remote.flatMap(d=>d.stops.map(s=>[s.id,s])));
  for(const day of candidate){
   let start=day.stops.length;
-  day.stops.forEach((s,i)=>{const old=prior.get(s.id);if(!old)return;if(s.duration!==old.duration)start=Math.min(start,i+1);if(s.travelMinutes!==old.travelMinutes&&s.travelMinutes!==undefined)start=Math.min(start,i);});
-  if(start<day.stops.length){const shifted=pushSchedule(day.stops,start);if(shifted.reason)notes.add(shifted.reason);}
+  day.stops.forEach((s,i)=>{const old=prior.get(s.id);if(!old)return;if(s.duration!==old.duration||s.time!==old.time)start=Math.min(start,i+1);if(s.travelMinutes!==old.travelMinutes&&s.travelMinutes!==undefined)start=Math.min(start,i);});
+  if(start<day.stops.length){const shifted=pushSchedule(day.stops,start,{exact:true});if(shifted.reason)notes.add(shifted.reason);}
  }
  return {days:candidate,reason:[...notes].join(' ')};
 }
@@ -282,7 +297,7 @@ function renderBoard(){
 }
 function renderTransportRow(stops,index){
  const draft=transportDirty&&transportDraft?.day===activeDay&&transportDraft.id===stops[index]?.id?transportDraft:null;
- return renderInlineTransportRow(stops,index,{canEdit:access.canEdit,draft});
+ return renderInlineTransportRow(stops,index,{canEdit:access.canEdit,draft,editing:transportEditorId===stops[index]?.id});
 }
 function inlineTransportForm(id=transportDraft?.id){return [...$('timeline').querySelectorAll('[data-transport-form]')].find(form=>form.dataset.transportId===id);}
 function inlineTransportFeedback(form,message,error=false){
@@ -305,12 +320,12 @@ function captureInlineTransport(form,target){
  if(!transportDirty){transportScope=null;transportDraft=null;}
  const {shape}=transportIcons[mode]||transportIcons.walking;
  form.querySelector('.inline-mode-icon .transport-icon').innerHTML=shape;form.closest('.inline-transfer').classList.toggle('is-dirty',transportDirty);
- form.querySelector('[data-transport-cancel]').hidden=!transportDirty;form.elements.minutes.setCustomValidity('');
- inlineTransportFeedback(form,transportDirty?'未儲存；儲存後會順延後續行程。':'');
+ form.elements.minutes.setCustomValidity('');
+ inlineTransportFeedback(form,transportDirty?'未儲存；完成後會重新計算後續時間。':'');
  if(transportDirty)$('save-status').textContent='交通時間尚未儲存';persistDraft();lockTransport();return true;
 }
 function discardInlineTransport(){
- if(busy||pending||conflict)return;transportDirty=false;transportScope=null;transportDraft=null;persistDraft();setDay(activeDay,activeStop);void autoSync.tick();
+ if(busy||pending||conflict)return;transportDirty=false;transportScope=null;transportDraft=null;transportEditorId='';persistDraft();setDay(activeDay,activeStop);void autoSync.tick();
 }
 async function saveInlineTransport(form){
  if(!canChange())return;
@@ -319,20 +334,65 @@ async function saveInlineTransport(form){
  let result;
  try{result=applyManualTransport(scope.days,day,id,{mode:form.elements.mode.value,minutes:form.elements.minutes.value});}
  catch(error){form.elements.minutes.setCustomValidity(error.message);form.elements.minutes.reportValidity();inlineTransportFeedback(form,error.message,true);return;}
- if(!transportDirty){inlineTransportFeedback(form,'這段交通時間已儲存。');return;}
- const message=`已儲存交通 ${result.minutes} 分鐘${result.result.changed?`，已順延 ${result.result.changed} 個行程`:''}。${result.result.reason}`;
+ if(!transportDirty){discardInlineTransport();return;}
+ const message=`已更新交通 ${result.minutes} 分鐘${result.result.changed?`，已重新計算 ${result.result.changed} 個行程`:''}。${result.result.reason}`;
  const saved=await commit(result.days,message,day,result.index,false,true,scope);
- if(saved){const savedForm=inlineTransportForm(id);inlineTransportFeedback(savedForm,message);savedForm?.querySelector('.inline-transfer-save')?.focus({preventScroll:true});}
+ if(saved){transportEditorId='';setDay(day,result.index);$('timeline').querySelector(`[data-transport-edit="${result.index}"]`)?.focus({preventScroll:true});}
  else inlineTransportFeedback(form,$('sync-error-text').textContent||'尚未儲存，內容已保留。',true);
+}
+function renderTimelineRail(stop,index){
+ const flight=stop.kind==='flight',active=timelineEditorId===stop.id,clock=stop.time||'待安排';
+ const stay=(flight?'飛行 ':'停留 ')+formatDuration(stop.duration);
+ const start=clockMinutes(stop.time),departure=start!==null&&Number.isInteger(stop.duration)?start+stop.duration:null;
+ const end=departure===null?'':String(Math.floor(departure%1440/60)).padStart(2,'0')+':'+String(departure%60).padStart(2,'0');
+ const display=`<time class="timeline-start">${esc(clock)}</time><span class="timeline-stay">${esc(stay)}</span>${end?`<span class="timeline-departure">${flight?'抵達':'離開'} ${end}${departure>=1440?' +1天':''}</span>`:''}${stop.live?'<span class="timeline-fixed">固定時間</span>':''}`;
+ if(!access.canEdit)return `<div class="timeline-rail"><div class="timeline-clock">${display}</div></div>`;
+ const button=flight?`<button type="button" class="timeline-clock" data-details="${index}" data-owner="${activeDay}" aria-label="${esc(stop.name)}：修改機票時間">${display}</button>`:`<button type="button" class="timeline-clock" data-timeline-edit="${index}" data-write aria-expanded="${active}" aria-label="${esc(stop.name)}：點擊修改開始與停留時間">${display}</button>`;
+ if(!active||flight)return `<div class="timeline-rail">${button}</div>`;
+ const value=/^([01]\d|2[0-3]):[0-5]\d$/.test(clock)?clock:'';
+ return `<div class="timeline-rail is-editing">${button}<form class="timeline-time-form" data-stay-form="${index}" data-time-id="${esc(stop.id)}" aria-label="${esc(stop.name)}的時間"><label>開始時間<input type="time" name="time" value="${value}" data-write aria-label="${esc(stop.name)}的開始時間"></label><div class="timeline-stay-field"><span>停留時間</span>${durationPicker(stop.duration,stop.name,'timeline-duration-'+index)}</div>${!value?'<span class="timeline-original-time">保留原時間，或選擇新時間</span>':''}<div class="timeline-time-actions"><button type="submit" data-write>完成</button><button type="button" data-timeline-cancel>取消</button></div><p class="timeline-time-feedback" role="status" aria-live="polite"></p></form></div>`;
+}
+function openTimelineTime(index){
+ if(!canChange()||transportDirty||editorDirty||importer.dirty||stayDraft&&timelineEditorId!==days[activeDay]?.stops[index]?.id){notice('請先完成目前的編輯。');return;}
+ const stop=days[activeDay]?.stops[index];if(!stop||stop.kind==='flight')return;
+ transportEditorId='';timelineEditorId=stop.id;setDay(activeDay,index);
+ $('timeline').querySelector(`[data-stay-form="${index}"] input`)?.focus({preventScroll:true});
+}
+function discardTimelineTime(){
+ if(busy||pending||conflict)return;stayDraft=null;timelineEditorId='';persistDraft();setDay(activeDay,activeStop);void autoSync.tick();
+}
+function captureTimelineTime(form){
+ if(!canChange()||transportDirty||editorDirty||importer.dirty)return false;
+ const index=Number(form.dataset.stayForm),stop=days[activeDay]?.stops[index];if(!stop||stop.id!==form.dataset.timeId)return false;
+ if(stayDraft&&!Object.hasOwn(stayDraft.values,stop.id))return false;
+ stayDraft??={scope:scopeSnapshot(),values:{}};
+ stayDraft.values[stop.id]={hours:form.elements.durationHours.value,minutes:form.elements.durationMinutes.value,time:form.elements.time.value};
+ form.querySelector('.timeline-time-feedback').textContent='完成後更新後續時間';persistDraft();lock();return true;
+}
+async function saveTimelineTime(form){
+ if(!captureTimelineTime(form))return;
+ const index=Number(form.dataset.stayForm),id=form.dataset.timeId,scope=stayDraft.scope,value=stayDraft.values[id];let changed;
+ try{changed=applyTimelineTime(scope.days,activeDay,id,{...value,time:value.time||scope.days[activeDay].stops[index].time});}
+ catch(error){form.querySelector('.timeline-time-feedback').textContent=error.message;return;}
+ const message='已更新時間'+(changed.result.changed?'，已重新計算 '+changed.result.changed+' 個行程':'')+(changed.result.reason?'。'+changed.result.reason:'');
+ const saved=await commit(changed.days,message,activeDay,changed.index,false,false,scope,id);
+ if(saved)$('timeline').querySelector(`[data-timeline-edit="${changed.index}"]`)?.focus({preventScroll:true});
+ else form.querySelector('.timeline-time-feedback').textContent=$('sync-error-text').textContent||'尚未儲存，內容已保留。';
+}
+function lockTimeline(){
+ for(const button of $('timeline').querySelectorAll('[data-timeline-edit]'))button.disabled=!canChange()||transportDirty||editorDirty||importer.dirty||!!stayDraft&&button.closest('[data-stop-id]')?.dataset.stopId!==timelineEditorId;
+ for(const form of $('timeline').querySelectorAll('[data-stay-form]')){for(const field of form.querySelectorAll('input,select,button'))field.disabled=!canChange()||transportDirty||editorDirty||importer.dirty;form.querySelector('[data-timeline-cancel]').disabled=busy||!!pending||conflict;}
 }
 function setDay(index,stop=0){
  if(dayNameDraft&&!restoringDraft){notice('請先儲存或取消每日名稱。');return;}
+ if(stayDraft&&!restoringDraft&&index!==activeDay){notice('請先完成或取消時間編輯。');return;}
+ if(index!==activeDay){transportEditorId='';timelineEditorId='';}
  const selected=boundedSelection(days,index,stop);activeDay=index=selected.day;activeStop=selected.stop;
  if(!days.length){$('day-tabs').innerHTML='';$('day-intro').innerHTML='<p>先從「我的旅行」建立或選擇一趟旅行。</p>';$('timeline').innerHTML='';renderMapStops();selectStop(activeStop);lock();return;}
  const d=days[index];
  renderDateTabs('day-tabs','tab','day-panel');
  $('day-intro').innerHTML=`<div class="day-edit-heading">${renderDayName(d,index,{canEdit:access.canEdit}).replaceAll("day-name-"+index,"daily-day-name-"+index)}<button class="primary" data-add="${index}" data-write>＋ 新增行程</button></div><p>${esc(d.intro||'')}</p>`;
- $('timeline').innerHTML=d.stops.map((s,j)=>`${renderTransportRow(d.stops,j)}<article class="stop ${s.live===true?'has-stop-avatar ':''}${s.kind==='flight'?'stop-flight ':''}category-${tagCategory(s.tag)} ${j===activeStop?'selected':''}" id="stop-${j}" data-stop-id="${esc(s.id)}" data-reorder-card data-details="${j}" data-owner="${index}" role="button" tabindex="0" aria-label="${esc([s.name,stopAvatarLabel(s)].filter(Boolean).join('，'))}" aria-describedby="reorder-hint"><div class="stop-body"><div class="stop-card-head"><time class="stop-time">${esc(s.time||'待安排')}</time><span class="tag">${tagCategory(s.tag)==='concert'?'♫ ':''}${esc(s.tag||'其他')}</span>${renderStopAvatar(s)}</div><h3 class="stop-name">${esc(s.name)}</h3>${s.desc?`<p class="stop-description">${esc(s.desc).replace(/\n/g,'<br>')}</p>`:''}${s.kind==='flight'?flightCardSummary(s):''}<div class="stop-summary"><span>停留 ${formatDuration(s.duration)}</span></div></div></article>`).join('')||'<div class="empty-day"><h3>把喜歡的地方，加進今天。</h3><p>這一天還沒有行程。</p><button class="primary" data-add="'+index+'" data-write>＋ 新增第一個行程</button></div>';
+ $('timeline').innerHTML=d.stops.map((s,j)=>`${renderTransportRow(d.stops,j)}<article class="stop timeline-stop ${s.live===true?'has-stop-avatar ':''}${s.kind==='flight'?'stop-flight ':''}category-${tagCategory(s.tag)} ${j===activeStop?'selected':''}" id="stop-${j}" data-stop-id="${esc(s.id)}" data-reorder-card data-details="${j}" data-owner="${index}" role="button" tabindex="0" aria-label="${esc([s.name,stopAvatarLabel(s)].filter(Boolean).join('，'))}" aria-describedby="reorder-hint">${renderTimelineRail(s,j)}<div class="stop-body"><div class="stop-card-head"><span class="tag">${tagCategory(s.tag)==='concert'?'♫ ':''}${esc(s.tag||'其他')}</span>${renderStopAvatar(s)}</div><h3 class="stop-name">${esc(s.name)}</h3>${s.desc?`<p class="stop-description">${esc(s.desc).replace(/\n/g,'<br>')}</p>`:''}${s.kind==='flight'?flightCardSummary(s):''}</div></article>`).join('')||'<div class="empty-day"><h3>把喜歡的地方，加進今天。</h3><p>這一天還沒有行程。</p><button class="primary" data-add="'+index+'" data-write>＋ 新增第一個行程</button></div>';
  $('reorder-hint').hidden=!access.canEdit;$('map-details').dataset.details=activeStop;$('map-details').dataset.owner=index;
  $('day-tip').textContent=d.tip;$('toolbar-add').dataset.add=index;renderMapStops();selectStop(activeStop);restoreStayInputs();lock();
 }
@@ -370,12 +430,12 @@ function renderPlaceMap(force=false){
 }
 function signIn(){if(appBase){location.reload();return;}location.assign('/signin-with-chatgpt?return_to='+encodeURIComponent(location.pathname+location.search));}
 function clearUnavailableTrip(){
- routeMap?.destroy();overviewMap?.destroy();routeMap=overviewMap=null;$('itinerary-route-map').replaceChildren();$('overview-route-map').replaceChildren();
+ routeMap?.destroy();overviewMap?.destroy();dailyRouteMap?.destroy();routeMap=overviewMap=dailyRouteMap=null;$('itinerary-route-map').replaceChildren();$('overview-route-map').replaceChildren();$('daily-route-map')?.replaceChildren();transportEditorId='';timelineEditorId='';
  const saved=persistDraft();ready=false;autoSync.stop();access={...access,canEdit:false,canShare:false};sharing.setSession(access);
  if(saved){
   // Keep the existing account/trip draft key for a later restoration, while
   // detaching this unavailable document so navigation cannot clear that draft.
-  draftStore=null;recovery=null;editorDirty=transportDirty=false;editorScope=transportScope=null;transportDraft=null;editing=null;stayDraft=null;dayNameDraft=null;pending=null;conflict=false;
+  draftStore=null;recovery=null;editorDirty=transportDirty=false;editorScope=transportScope=null;transportDraft=null;transportEditorId='';timelineEditorId='';editing=null;stayDraft=null;dayNameDraft=null;pending=null;conflict=false;
   if($('import-dialog').open)importer.close();for(const id of ['editor','transport-dialog','conflict-dialog'])if($(id).open)$(id).close();
   $('draft-recovery').hidden=true;
  }
@@ -417,6 +477,7 @@ async function loadSnapshot(){
 async function commit(next,message,day=activeDay,stop=activeStop,retry=false,transport=false,scope=null,stayId=null){
  if(conflict){showConflicts();return false;}
  if(transportDirty&&!transport&&!retry){notice('請先儲存或取消卡片之間的交通時間。');return false;}
+ if(stayDraft&&!stayId&&!retry){notice('請先完成或取消時間編輯。');return false;}
  if(!tripId||!access.canEdit||!ready||busy)return false;
  if(scope?.tripId&&scope.tripId!==tripId||pending?.tripId&&pending.tripId!==tripId){notice('這份草稿屬於其他旅行，請回到原旅行儲存。');return false;}
  if(!retry)pending={tripId,base:clone(scope?.days||days),days:clearStaleTravel(next),revision:scope?.revision??revision,mutationId:crypto.randomUUID(),message,day,stop,transport,stayId};
@@ -437,7 +498,7 @@ async function commit(next,message,day=activeDay,stop=activeStop,retry=false,tra
   }
   if(epoch!==identityEpoch)return false;
   if(!result)throw Error('同行者仍在更新行程，內容已保留，請稍後重試儲存。');
-  cacheConfirmed(result);days=result.days;currentTrip=result.trip||currentTrip;previous=result.previous;revision=result.revision;renderTripMeta();pending=null;dayNameDraft=null;editorDirty=false;editorScope=null;transportDirty=false;transportScope=null;transportDraft=null;recovery=null;$('draft-recovery').hidden=true;
+  cacheConfirmed(result);days=result.days;currentTrip=result.trip||currentTrip;previous=result.previous;revision=result.revision;renderTripMeta();pending=null;dayNameDraft=null;editorDirty=false;editorScope=null;transportDirty=false;transportScope=null;transportDraft=null;transportEditorId='';timelineEditorId='';recovery=null;$('draft-recovery').hidden=true;
   if(task.stayId&&stayDraft){delete stayDraft.values[task.stayId];if(!Object.keys(stayDraft.values).length)stayDraft=null;}
   if(stayDraft){recovery={stay:clone(stayDraft)};$('draft-recovery').hidden=false;}
   $('sync-error').hidden=true;$('save-status').textContent='已儲存至雲端';$('editor').close();if($('import-dialog').open)importer.close();editing=null;refresh(task.day,task.stop);persistDraft();notice(task.message);if($('transport-dialog').open){renderTransport();$('transport-feedback').textContent=task.message;}return true;
@@ -458,6 +519,8 @@ async function commit(next,message,day=activeDay,stop=activeStop,retry=false,tra
 }
 function openEditor(day,index=null,scope=null,view=false){
  if(!view&&transportDirty){notice('請先儲存或取消卡片之間的交通時間。');return;}
+ if(stayDraft&&!restoringDraft){notice('請先完成或取消時間編輯。');return;}
+ if(!transportDirty){transportEditorId='';timelineEditorId='';}
  if(!ready||busy||pending||conflict||(!view&&!canChange()))return;editorReadOnly=view;editorScope=scope||scopeSnapshot();editorDirty=false;newStopId=crypto.randomUUID();editing=index===null?null:{day,index,id:editorScope.days[day].stops[index].id};const s=index===null?{}:editorScope.days[day].stops[index];
  $('editor-form').reset();$('field-kind').value=s.kind==='flight'?'flight':'place';$('field-coordinates').value=pointText(getStopCoordinates(s));initFlightFields(s.flight,day);$('field-name').setCustomValidity('');$('editor-title').textContent=view?'行程詳情':index===null?'新增行程':'編輯行程';$('field-day').innerHTML=days.map((d,i)=>`<option value="${i}">${esc(d.isoDate||d.date)} ${esc(d.week)}</option>`).join('');$('field-day').value=day;
  $('field-tag').innerHTML=tagOptions(s.tag).map(value=>`<option value="${esc(value)}">${esc(value)}</option>`).join('');
@@ -513,8 +576,12 @@ document.addEventListener('click',e=>{
  const action=e.target.closest('button,[data-reorder-card]');if(!action)return;
  const menu=action.closest('.toolbar-more');if(menu)menu.open=false;
  if(action.disabled)return;
- if(action.hasAttribute('data-day-name-cancel')){dayNameDraft=null;persistDraft();refresh();void autoSync.tick();return;}
+ if(action.hasAttribute('data-day-name-cancel')){cancelDayName(action.closest('[data-day-name-form]'));return;}
  if(action.hasAttribute('data-transport-cancel')){discardInlineTransport();return;}
+ if(action.hasAttribute('data-timeline-cancel')){discardTimelineTime();return;}
+ if(action.hasAttribute('data-timeline-edit')){openTimelineTime(Number(action.dataset.timelineEdit));return;}
+ if(action.hasAttribute('data-transport-edit')){if(!canChange()||stayDraft||editorDirty||importer.dirty||transportDirty&&transportDraft?.id!==action.dataset.transportId){notice('請先完成目前的編輯。');return;}timelineEditorId='';transportEditorId=action.dataset.transportId;setDay(activeDay,activeStop);inlineTransportForm(transportEditorId)?.elements.minutes.focus({preventScroll:true});return;}
+ if((e.target.closest('[data-stay-form],[data-transport-form]')||e.target.closest('.timeline-rail'))&&!action.hasAttribute('data-details')&&!action.hasAttribute('data-transport'))return;
  if(action.hasAttribute('data-open-day')){setDay(Number(action.dataset.openDay));showPage('daily');return;}
  if(action.hasAttribute('data-view-map')){if($('editor').open&&editorReadOnly)$('editor').close();selectStop(Number(action.dataset.viewMap));showPage('map');return;}
  if(action.hasAttribute('data-transport')){openTransport(Number(action.dataset.transport));return;}
@@ -530,10 +597,13 @@ document.addEventListener('click',e=>{
  if(action.hasAttribute('data-select'))selectStop(Number(action.dataset.select));
 });
 $('timeline').addEventListener('submit',event=>{
+ const timeForm=event.target.closest('[data-stay-form]');if(timeForm){event.preventDefault();event.stopPropagation();void saveTimelineTime(timeForm);return;}
  const form=event.target.closest('[data-transport-form]');if(!form)return;
  event.preventDefault();event.stopPropagation();void saveInlineTransport(form);
 });
 $('timeline').addEventListener('keydown',e=>{
+ if(e.key==='Escape'&&e.target.closest('[data-transport-form]')){e.preventDefault();discardInlineTransport();return;}
+ if(e.key==='Escape'&&e.target.closest('[data-stay-form]')){e.preventDefault();discardTimelineTime();return;}
  const card=e.target.closest('[data-reorder-card]');
  if(card&&e.target===card&&['Enter',' '].includes(e.key)){e.preventDefault();card.click();}
 });
@@ -569,8 +639,8 @@ $('editor-form').addEventListener('submit',async e=>{
  if(editing)next[editing.day].stops.splice(editing.index,1);
  const index=Math.max(0,Math.min(Number($('field-order').value),next[day].stops.length));
  next[day].stops.splice(index,0,stop);clearStaleTravel(next);
- const shifted=stay!==original.duration&&index+1<next[day].stops.length?pushSchedule(next[day].stops,index+1):{changed:0,reason:''};
- await commit(next,(editing?'行程已更新':'已新增行程')+(shifted.changed?'，已順延 '+shifted.changed+' 個行程':'')+(shifted.reason?'。'+shifted.reason:''),day,index,false,false,editorScope,stop.id);
+ const shifted=(stay!==original.duration||stop.time!==original.time)&&index+1<next[day].stops.length?pushSchedule(next[day].stops,index+1,{exact:true}):{changed:0,reason:''};
+ await commit(next,(editing?'行程已更新':'已新增行程')+(shifted.changed?'，已重新計算 '+shifted.changed+' 個行程':'')+(shifted.reason?'。'+shifted.reason:''),day,index,false,false,editorScope,stop.id);
 });
 function updateTagPreview(){const tag=$('field-tag').value,preview=$('tag-preview');preview.className='tag-preview category-'+tagCategory(tag);preview.querySelector('.tag').textContent=tag;}
 $('field-tag').addEventListener('change',updateTagPreview);
@@ -600,11 +670,12 @@ $('trip-rename-open').addEventListener('click',async()=>{if(!canChange()||!canSw
 $('editor-start-edit').addEventListener('click',()=>{if(!canChange())return;if(transportDirty){notice('請先儲存或取消卡片之間的交通時間。');return;}editorReadOnly=false;$('editor-title').textContent='編輯行程';lock();$('field-name').focus();});
 $('editor-delete').addEventListener('click',()=>{if(canChange()&&editing)void remove(editing.day,editing.index);});
 window.addEventListener('popstate',()=>{
+ if(dayNameDraft){persistDraft();history.replaceState(null,'',routeUrl(currentPage,activeDay,activeStop,appBase,tripId));notice('名稱編輯尚未完成，請離開欄位自動儲存，或按 Esc 取消。');return;}
  if(busy||pending||conflict||dragging){history.replaceState(null,'',routeUrl(currentPage,activeDay,activeStop,appBase,tripId));notice('請先完成目前的儲存或衝突處理。');return;}
  if(draftStore&&!persistDraft()){history.replaceState(null,'',routeUrl(currentPage,activeDay,activeStop,appBase,tripId));return;}
  if((new URL(location.href).searchParams.get('trip')||'')!==tripId){autoSync.stop();location.reload();return;}
  if(editorDirty||transportDirty||stayDraft||importer.dirty){
-  recovery=draftStore?.read()||null;editorDirty=transportDirty=false;editorScope=transportScope=null;transportDraft=null;editing=null;stayDraft=null;
+  recovery=draftStore?.read()||null;editorDirty=transportDirty=false;editorScope=transportScope=null;transportDraft=null;transportEditorId='';timelineEditorId='';editing=null;stayDraft=null;
   if($('import-dialog').open)importer.close();$('draft-recovery').hidden=!recovery;
  }
  for(const id of ['editor','transport-dialog','import-dialog'])if($(id).open)$(id).close();
@@ -629,7 +700,9 @@ function lockTransport(){
  for(const form of $('timeline').querySelectorAll('[data-transport-form]')){
   const locked=!canChange()||editorDirty||!!stayDraft||importer.dirty||transportDirty&&transportDraft?.id!==form.dataset.transportId;
   for(const element of form.querySelectorAll('input,select,[type="submit"],[data-transport-cancel]'))element.disabled=locked;
+  form.querySelector('[data-transport-cancel]').disabled=busy||!!pending||conflict;
  }
+ for(const button of $('timeline').querySelectorAll('[data-transport-edit]'))button.disabled=!canChange()||editorDirty||!!stayDraft||importer.dirty||transportDirty&&transportDraft?.id!==button.dataset.transportId;
  $('transport-mode').disabled=!ready||busy||!!pending||conflict;
  $('transport-edit').hidden=true;
  $('close-transport').disabled=busy;
@@ -705,16 +778,11 @@ function captureDraft(event){
  if(event.target.closest('#editor')){if(editorReadOnly)return;editorDirty=true;}
  else if(event.target.closest('[data-transport-form]')){captureInlineTransport(event.target.closest('[data-transport-form]'),event.target);return;}
  else if(event.target.matches('#transport-mode'))return;
- else{
-  const form=event.target.closest('[data-stay-form]');if(!form)return;
-  stayDraft??={scope:scopeSnapshot(),values:{}};
-  const id=days[activeDay].stops[Number(form.dataset.stayForm)].id;
-  stayDraft.values[id]={hours:form.elements.durationHours.value,minutes:form.elements.durationMinutes.value};
- }
+ else{const form=event.target.closest('[data-stay-form]');if(!form)return;captureTimelineTime(form);return;}
  persistDraft();
 }
 document.addEventListener('input',captureDraft);document.addEventListener('change',captureDraft);
-$('draft-discard').addEventListener('click',()=>{recovery=null;stayDraft=null;dayNameDraft=null;transportDirty=false;transportScope=null;transportDraft=null;draftStore?.clear();$('draft-recovery').hidden=true;setDay(activeDay,activeStop);lock();void autoSync.tick();notice('已捨棄這個裝置的未儲存草稿');});
+$('draft-discard').addEventListener('click',()=>{recovery=null;stayDraft=null;dayNameDraft=null;transportDirty=false;transportScope=null;transportDraft=null;transportEditorId='';timelineEditorId='';draftStore?.clear();$('draft-recovery').hidden=true;setDay(activeDay,activeStop);lock();void autoSync.tick();notice('已捨棄這個裝置的未儲存草稿');});
 $('draft-restore').addEventListener('click',()=>{
  if(!recovery||!access.canEdit||busy)return;
  const saved=recovery;restoringDraft=true;
@@ -735,7 +803,7 @@ $('draft-restore').addEventListener('click',()=>{
   if(stayDraft&&!saved.editor&&!saved.imported&&!saved.transport&&!saved.pending){
    const [id,value]=Object.entries(stayDraft.values)[0]||[];
    const day=stayDraft.scope.days.findIndex(d=>d.stops.some(s=>s.id===id));
-   if(day>=0){const index=stayDraft.scope.days[day].stops.findIndex(s=>s.id===id);refresh(day,index);openEditor(day,index,stayDraft.scope);$('editor-form').elements.durationHours.value=value.hours;$('editor-form').elements.durationMinutes.value=value.minutes;editorDirty=true;}
+   if(day>=0){const index=stayDraft.scope.days[day].stops.findIndex(s=>s.id===id);timelineEditorId=id;refresh(day,index);showPage('daily');restoreStayInputs();$('timeline').querySelector(`[data-stay-form="${index}"] input`)?.focus({preventScroll:true});}
   }
   pending=saved.pending||null;conflict=!!pending?.merge;recovery=null;$('draft-recovery').hidden=true;
   if(pending){$('sync-error').hidden=false;$('sync-error-text').textContent='已恢復未送出的修改，儲存前會與雲端最新版本合併。';$('retry').textContent=conflict?'處理衝突':'重試儲存';}
@@ -754,17 +822,30 @@ function updateFlightEditor(){
  $('field-time').closest('label').hidden=flight;$('field-duration').closest('.duration-field').hidden=flight;$('field-fixed').closest('label').hidden=flight;$('field-tag').closest('.tag-field').hidden=flight;
  if(flight)$('field-fixed').checked=true;
 }
-function flightCardSummary(stop){const f=stop.flight;return '<p class="flight-summary-card">✈ '+esc(formatFlightSummary(f))+'<br>'+esc(f.departureDateTime.replace('T',' ')+' '+f.departureTimezone)+' → '+esc(f.arrivalDateTime.replace('T',' ')+' '+f.arrivalTimezone)+'</p>';}
+function flightCardSummary(stop){
+ const f=stop.flight;if(!f)return '';let duration='';try{duration=formatDuration(flightDuration(f));}catch{}
+ const endpoint=(date,zone,airport)=>`<div class="flight-ticket-end"><span class="flight-ticket-date">${esc(date.slice(0,10).replaceAll('-','/'))}</span><time class="flight-ticket-time">${esc(date.slice(11))}</time><span class="flight-ticket-airport">${esc(airport)}</span><span class="flight-ticket-zone">${esc(zone)} 當地時間</span></div>`;
+ return `<div class="flight-ticket"><div class="flight-ticket-heading">✈ ${esc([f.airline,f.number].filter(Boolean).join(' · ')||'機票')}</div><div class="flight-ticket-route">${endpoint(f.departureDateTime,f.departureTimezone,f.departureAirport)}<div class="flight-ticket-duration"><span>${esc(duration)}</span><span class="flight-ticket-arrow" aria-hidden="true"></span></div>${endpoint(f.arrivalDateTime,f.arrivalTimezone,f.arrivalAirport)}</div></div>`;
+}
 function lockDayNames(){
  for(const form of document.querySelectorAll('[data-day-name-form]')){const blocked=!access.canEdit||!ready||busy||!!pending||conflict||!!recovery||transportDirty||editorDirty||!!stayDraft||importer.dirty||dayNameDraft&&Number(form.dataset.dayIndex)!==dayNameDraft.day;for(const field of form.querySelectorAll('input,button'))field.disabled=!!blocked;form.querySelector('[data-day-name-cancel]').hidden=!(dayNameDraft&&Number(form.dataset.dayIndex)===dayNameDraft.day);}
 }
 function captureDayName(form){const day=Number(form.dataset.dayIndex);if(dayNameDraft&&dayNameDraft.day!==day)return;form.elements.dayName.setCustomValidity('');dayNameDraft??={scope:scopeSnapshot(),day,value:''};dayNameDraft.value=form.elements.dayName.value;persistDraft();lock();}
-document.addEventListener('submit',async event=>{
- const form=event.target.closest('[data-day-name-form]');if(!form)return;event.preventDefault();if(!access.canEdit||!ready||busy||pending||conflict)return;
+const cancelledDayNameForms=new WeakSet();
+function cancelDayName(form){if(busy||pending||conflict)return;if(form)cancelledDayNameForms.add(form);dayNameDraft=null;persistDraft();refresh();void autoSync.tick();}
+async function saveDayName(form){
+ if(cancelledDayNameForms.has(form)||!form.isConnected||!access.canEdit||!ready||busy||pending||conflict||!dayNameDraft)return;
  const day=Number(form.dataset.dayIndex),scope=dayNameDraft?.scope||scopeSnapshot();let next;
  try{next=renameDay(scope.days,day,form.elements.dayName.value);}catch(error){form.elements.dayName.setCustomValidity(error.message);form.elements.dayName.reportValidity();return;}
+ if(next[day].title===scope.days[day].title){cancelDayName(form);return;}
  await commit(next,'已更新每日名稱',day,activeStop,false,false,scope);
+}
+document.addEventListener('submit',event=>{
+ const form=event.target.closest('[data-day-name-form]');if(!form)return;event.preventDefault();void saveDayName(form);
 });
+document.addEventListener('focusout',event=>{if(event.target.name!=='dayName')return;const form=event.target.closest('[data-day-name-form]');if(!form||form.contains(event.relatedTarget))return;void saveDayName(form);});
+document.addEventListener('pointerdown',event=>{const field=document.activeElement;if(!dayNameDraft||field?.name!=='dayName')return;const form=field.closest('[data-day-name-form]');if(form&&!form.contains(event.target))void saveDayName(form);},true);
+document.addEventListener('keydown',event=>{if(event.key!=='Escape'||event.target.name!=='dayName')return;event.preventDefault();cancelDayName(event.target.closest('[data-day-name-form]'));});
 $('field-kind').addEventListener('change',()=>{updateFlightEditor();$('field-coordinates').value='';$('field-mapUrl').value='';if($('field-kind').value==='flight'){$('field-q').value=readFlightFields().departureAirport||'';if(!$('field-name').value)$('field-name').value='航班';}editorDirty=true;persistDraft();});
 $('editor-flight-fields').addEventListener('input',event=>{if(event.target.name==='flight.departureAirport'){$('field-q').value=event.target.value;$('field-coordinates').value='';$('field-mapUrl').value='';persistDraft();}});
 $('field-q').addEventListener('input',()=>{$('field-coordinates').value='';if(editing&&$('field-mapUrl').value===editorScope.days[editing.day].stops[editing.index].mapUrl)$('field-mapUrl').value='';persistDraft();});

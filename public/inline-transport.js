@@ -1,4 +1,5 @@
 import {legSignature,savedTravelMinutes,pushSchedule} from './transport.js';
+import {durationMinutes} from './duration.js';
 
 export const transportIcons={
  walking:{label:'步行',shape:'<circle cx="13" cy="4" r="2"/><path d="m7 21 3-6 3-3 1 4 4 5M6 11l4-4 4 1 3 4h3M10 7l-1 7"/>'},
@@ -22,15 +23,29 @@ export function applyManualTransport(days,day,id,values){
  const index=stops?.findIndex(stop=>stop.id===id)??-1;
  if(index<0||index===0&&!stops[0].from)throw Error('找不到這兩站的交通行程，請重新整理後再試。');
  const stop=stops[index];stop.mode=input.mode;stop.travelMinutes=input.minutes;stop.travelSignature=legSignature(stops,index);
- return {days:next,index,...input,result:pushSchedule(stops,index)};
+ return {days:next,index,...input,result:pushSchedule(stops,index,{exact:true})};
 }
 
-export function renderInlineTransportRow(stops,index,{canEdit=false,draft=null}={}){
+// Time and stay edits use the same scoped snapshot as a traffic edit.
+export function applyTimelineTime(days,day,id,{time,hours,minutes}){
+ const next=structuredClone(days),stops=next[day]?.stops,index=stops?.findIndex(stop=>stop.id===id)??-1;
+ if(index<0)throw Error('找不到要修改時間的行程。');
+ const stop=stops[index];if(stop.kind==='flight')throw Error('請在機票詳情修改出發與抵達時間。');
+ const value=String(time??'').trim();
+ // An old descriptive time may be retained while only the stay is changed.
+ if(value!==String(stop.time??'')&&!/^([01]\d|2[0-3]):[0-5]\d$/.test(value))throw Error('請選擇有效的開始時間。');
+ const duration=durationMinutes(hours,minutes);stop.time=value;
+ if(duration===undefined)delete stop.duration;else stop.duration=duration;
+ return {days:next,index,result:pushSchedule(stops,index+1,{exact:true})};
+}
+
+export function renderInlineTransportRow(stops,index,{canEdit=false,draft=null,editing=false}={}){
  if(!stops[index]||index===0&&!stops[index].from)return '';
  const stop=stops[index],mode=draft?.mode||stop.mode||'walking',safeMode=Object.hasOwn(transportIcons,mode)?mode:'walking';
  const minutes=draft?draft.minutes:savedTravelMinutes(stops,index),pair=(index?stops[index-1].name:stop.from)+' → '+stop.name;
  const route=`<button type="button" class="inline-route-button" data-transport="${index}" aria-haspopup="dialog" aria-label="${esc(pair)}：查看 Google Maps 路線">Google Maps ↗</button>`;
  if(!canEdit)return `<div class="transfer-row inline-transfer is-viewer"><div class="inline-transfer-summary">${icon(safeMode)}<span>${transportIcons[safeMode].label}</span><strong>${minutes===null?'未設定時間':esc(minutes)+' 分鐘'}</strong>${route}</div></div>`;
+ if(!editing&&!draft)return `<div class="transfer-row inline-transfer is-collapsed"><div class="inline-transfer-summary"><button type="button" class="inline-transfer-edit" data-transport-edit="${index}" data-transport-id="${esc(stop.id)}" data-write aria-expanded="false" aria-label="${esc(pair)}：點擊修改交通方式與時間">${icon(safeMode)}<span>${transportIcons[safeMode].label}</span><strong>${minutes===null?'未設定時間':esc(minutes)+' 分鐘'}</strong><span class="inline-edit-mark" aria-hidden="true">✎</span></button>${route}</div></div>`;
  const feedback=`transfer-feedback-${index}`;
- return `<div class="transfer-row inline-transfer${draft?' is-dirty':''}"><form class="inline-transfer-form" data-transport-form="${index}" data-transport-id="${esc(stop.id)}" aria-label="${esc(pair)}的交通"><span class="inline-mode-icon">${icon(safeMode)}</span><label class="inline-mode-label"><span class="inline-sr-only">${esc(pair)}的交通方式</span><select name="mode" data-write>${Object.entries(transportIcons).map(([value,item])=>`<option value="${value}" ${safeMode===value?'selected':''}>${item.label}</option>`).join('')}</select></label><label class="inline-minutes-label"><span class="inline-sr-only">${esc(pair)}的交通時間（分鐘）</span><input name="minutes" type="number" inputmode="numeric" min="0" max="1440" step="1" required placeholder="分鐘" value="${esc(minutes??'')}" aria-describedby="${feedback}" data-write><span>分鐘</span></label><button type="submit" class="inline-transfer-save" data-write>儲存</button>${route}<button type="button" class="inline-transfer-cancel" data-transport-cancel="${index}" ${draft?'':'hidden'}>取消</button><p class="inline-transfer-feedback" id="${feedback}" role="status" aria-live="polite">${draft?'未儲存；儲存後會順延後續行程。':''}</p></form></div>`;
+ return `<div class="transfer-row inline-transfer is-editing${draft?' is-dirty':''}"><form class="inline-transfer-form" data-transport-form="${index}" data-transport-id="${esc(stop.id)}" aria-label="${esc(pair)}的交通"><span class="inline-mode-icon">${icon(safeMode)}</span><label class="inline-mode-label"><span class="inline-sr-only">${esc(pair)}的交通方式</span><select name="mode" data-write>${Object.entries(transportIcons).map(([value,item])=>`<option value="${value}" ${safeMode===value?'selected':''}>${item.label}</option>`).join('')}</select></label><label class="inline-minutes-label"><span class="inline-sr-only">${esc(pair)}的交通時間（分鐘）</span><input name="minutes" type="number" inputmode="numeric" min="0" max="1440" step="1" required placeholder="分鐘" value="${esc(minutes??'')}" aria-describedby="${feedback}" data-write><span>分鐘</span></label><button type="submit" class="inline-transfer-save" data-write>完成</button>${route}<button type="button" class="inline-transfer-cancel" data-transport-cancel="${index}">取消</button><p class="inline-transfer-feedback" id="${feedback}" role="status" aria-live="polite">${draft?'未儲存；完成後會順延後續行程。':''}</p></form></div>`;
 }

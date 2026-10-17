@@ -5,7 +5,7 @@ import {mountRouteMap} from '../public/route-map.js';
 function environment(t){
  const previous=new Map(),cleanups=[],install=(key,value)=>{previous.set(key,Object.getOwnPropertyDescriptor(globalThis,key));Object.defineProperty(globalThis,key,{configurable:true,writable:true,value});};
  class Element extends EventTarget{
-  constructor(tag){super();this.tagName=tag;this.children=[];this.parentElement=null;this.attributes=new Map();this.dataset={};this.style={};this.className='';this.textContent='';this.hidden=false;this.disabled=false;
+  constructor(tag){super();this.tagName=tag;this.children=[];this.parentElement=null;this.attributes=new Map();this.dataset={};this.style={setProperty(name,value){this[name]=String(value);}};this.className='';this.textContent='';this.hidden=false;this.disabled=false;
    this.classList={toggle:(name,enabled)=>{const names=new Set(this.className.split(' ').filter(Boolean));if(enabled)names.add(name);else names.delete(name);this.className=[...names].join(' ');}};
   }
   append(...children){for(const child of children){child.parentElement=this;this.children.push(child);}}
@@ -70,4 +70,29 @@ test('tile failures expose a manual retry without hiding or deleting itinerary m
  tile.events.tileerror({tile:{src:'failed-tile'}});assert.equal(retry.hidden,false);assert.match(status.textContent,/行程標記仍可查看/);assert.equal(env.groups[0].items.length,1);
  retry.dispatchEvent(new Event('click'));assert.equal(tile.redraws,1);assert.equal(env.groups[0].items.length,1);
  tile.events.tileload({tile:{src:'failed-tile'}});tile.events.load();assert.equal(retry.hidden,true);assert.match(status.textContent,/已標示 1 站/);
+});
+
+test('date legend, numbered pins, and separate lines all use the same safe day palette',t=>{
+ const env=environment(t),stops=[
+  {id:'a',name:'A',q:'25,121',dayIndex:0,date:'2027-01-01'},
+  {id:'b',name:'B',q:'26,122',dayIndex:0,date:'2027-01-01'},
+  {id:'c',name:'C',q:'26,122',dayIndex:1,date:'2027-01-02',dayColor:'url(javascript:bad)'},
+  {id:'d',name:'D',q:'27,123',dayIndex:1,date:'2027-01-02'},
+ ];
+ const controller=mountRouteMap(env.container,{stops});env.cleanup(()=>controller.destroy());
+ const legend=env.container.children[0].children[3],markers=env.groups[0].items,lines=env.groups[1].items;
+ assert.equal(legend.getAttribute('aria-label'),'日期顏色圖例');assert.equal(legend.children.length,2);
+ assert.deepEqual(legend.children.map(item=>item.children[1].textContent),['2027-01-01','2027-01-02']);
+ const colors=legend.children.map(item=>item.style['--route-day-color']);
+ assert.notEqual(colors[0],colors[1]);
+ assert.deepEqual(lines.map(line=>line.options.color),['#ffffff',colors[0],'#ffffff',colors[1]]);
+ assert.deepEqual(lines[1].points,[[25,121],[26,122]]);assert.deepEqual(lines[3].points,[[26,122],[27,123]]);
+ assert.deepEqual(markers.map(marker=>marker.options.icon.html.style['--route-day-color']),[colors[0],colors[0],colors[1],colors[1]]);
+ assert.deepEqual(markers[1].point,markers[2].point);
+ assert.notEqual(markers[1].options.icon.html.children.at(-1).style.transform,markers[2].options.icon.html.children.at(-1).style.transform);
+ const fitCount=env.maps[0].fitCount;
+ controller.update({stops:stops.map(stop=>({...stop,dayIndex:stop.dayIndex+1}))});
+ assert.equal(env.maps[0].fitCount,fitCount,'day presentation changes do not reset the map camera');
+ assert.notEqual(legend.children[0].style['--route-day-color'],colors[0]);
+ controller.update({stops:[]});assert.equal(legend.hidden,true);
 });

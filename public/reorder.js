@@ -146,7 +146,7 @@ export function initReorder(container,{canStart,onStart,onFinish,onMove}){
  window.addEventListener('keydown',event=>{if(event.key==='Escape'&&gesture.pending){event.preventDefault();gesture.cancel();}});
  container.addEventListener('keydown',async event=>{
   const handle=event.target.closest('[data-reorder-handle],[data-reorder-card]');
-  if(!handle||handle.disabled||settling||gesture.pending||!['ArrowUp','ArrowDown','Home','End'].includes(event.key)||!canStart())return;
+  if(!handle||event.target!==handle||handle.disabled||settling||gesture.pending||!['ArrowUp','ArrowDown','Home','End'].includes(event.key)||!canStart())return;
   event.preventDefault();const items=cards(),card=handle.closest('[data-stop-id]'),from=items.indexOf(card);
   const to=event.key==='Home'?0:event.key==='End'?items.length-1:from+(event.key==='ArrowUp'?-1:1);
   if(to<0||to>=items.length||to===from)return;settling=true;const scope=onStart();

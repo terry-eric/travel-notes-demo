@@ -4,8 +4,8 @@ const TILE_URL='https://tile.openstreetmap.org/{z}/{x}/{y}.png';
 const ATTRIBUTION='&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a> contributors';
 const el=(tag,className,text)=>{const node=document.createElement(tag);if(className)node.className=className;if(text!==undefined)node.textContent=text;return node;};
 const geometryKey=model=>JSON.stringify(model.entries.map(entry=>[entry.id,entry.coordinates]));
-const presentationKey=model=>JSON.stringify(model.entries.map(entry=>[entry.id,entry.number,entry.coordinates,entry.stop.name,entry.stop.dayLabel,entry.stop.date]));
-const label=entry=>`第 ${entry.number} 站，${String(entry.stop.name||'未命名行程')}`;
+const presentationKey=model=>JSON.stringify(model.entries.map(entry=>[entry.id,entry.number,entry.coordinates,entry.stop.name,entry.day]));
+const label=entry=>`${entry.day.label}，第 ${entry.number} 站，${String(entry.stop.name||'未命名行程')}`;
 
 /**
  * Requires the locally vendored Leaflet script and stylesheet to be loaded.
@@ -18,15 +18,26 @@ export function mountRouteMap(container,options={}){
  let model=buildRouteMapModel(config.stops),map=null,tileLayer=null,markerLayer=null,lineLayer=null,destroyed=false,pendingFit=true,frame=0,slowTimer=0,lastGeometry='',lastPresentation='',tilesLoading=false;
  let failedTiles=new Set(),markers=new Map();
  const shell=el('div','route-map-shell'),toolbar=el('div','route-map-toolbar'),heading=el('div','route-map-heading');
- heading.append(el('strong','', '行程路線'),el('span','route-map-caption','依行程順序連線'));
+ heading.append(el('strong','', '行程路線'),el('span','route-map-caption','依日期分色 · 依行程順序連線'));
  const fitButton=el('button','route-map-fit','顯示全部');fitButton.type='button';
  toolbar.append(heading,fitButton);
  const canvas=el('div','route-map-canvas');canvas.setAttribute('role','region');canvas.setAttribute('aria-label','行程地圖，可使用方向鍵移動、加減鍵縮放');
  const footer=el('div','route-map-footer'),status=el('p','route-map-status');status.setAttribute('role','status');status.setAttribute('aria-live','polite');
  const retryButton=el('button','route-map-retry','重新載入底圖');retryButton.type='button';retryButton.hidden=true;
  footer.append(status,retryButton);
- const note=el('p','route-map-note','粉紅線是景點間的行程連線；實際道路、交通時間請在 Google Maps 確認。');
- shell.append(toolbar,canvas,footer,note);container.replaceChildren(shell);
+ const legend=el('ul','route-map-legend');legend.setAttribute('aria-label','日期顏色圖例');
+ const note=el('p','route-map-note','同色線是同一天景點間的行程連線；實際道路、交通時間請在 Google Maps 確認。');
+ shell.append(toolbar,canvas,footer,legend,note);container.replaceChildren(shell);
+
+ function renderLegend(){
+  const items=model.days.map(day=>{
+   const item=el('li','route-map-legend-day');item.style.setProperty('--route-day-color',day.color);
+   const swatch=el('span','route-map-legend-swatch');swatch.setAttribute('aria-hidden','true');
+   const text=el('span','',day.label);item.append(swatch,text);return item;
+  });
+  legend.replaceChildren(...items);legend.hidden=!items.length;
+ }
+ renderLegend();
 
  function report(){
   if(destroyed)return;
@@ -68,12 +79,13 @@ export function mountRouteMap(container,options={}){
   for(const segment of model.segments){
    const points=segment.map(entry=>[entry.coordinates.lat,entry.coordinates.lng]);
    globalThis.L.polyline(points,{color:'#ffffff',weight:8,opacity:.76,interactive:false}).addTo(lineLayer);
-   globalThis.L.polyline(points,{color:'#ee4b88',weight:4,opacity:.86,interactive:false}).addTo(lineLayer);
+   globalThis.L.polyline(points,{color:segment[0].day.color,weight:4,opacity:.86,interactive:false}).addTo(lineLayer);
   }
   const offsets=duplicatePinOffsets(model.located);
   for(const entry of model.located){
    const {x,y}=offsets.get(entry.id)||{x:0,y:0};
    const host=el('div','route-map-marker');host.dataset.routeStopId=entry.id;
+   host.style.setProperty('--route-day-color',entry.day.color);
    const pinWrap=el('div','route-map-pin-wrap');pinWrap.style.transform=`translate(${x}px,${y}px)`;
    const button=el('button','route-map-pin');button.type='button';button.setAttribute('aria-label',label(entry));button.setAttribute('title',label(entry));
    button.append(el('span','route-map-pin-number',String(entry.number)));
@@ -86,13 +98,13 @@ export function mountRouteMap(container,options={}){
    const icon=globalThis.L.divIcon({className:'route-map-marker-host',html:host,iconSize:[40,44],iconAnchor:[20,44]});
    const marker=globalThis.L.marker([entry.coordinates.lat,entry.coordinates.lng],{icon,keyboard:false,riseOnHover:true});
    button.addEventListener('click',event=>{event.stopPropagation();select(entry);});
-   const popup=el('div','route-map-popup');popup.append(el('small','',`第 ${entry.number} 站`),el('strong','',String(entry.stop.name||'未命名行程')));
+   const popup=el('div','route-map-popup');popup.style.setProperty('--route-day-color',entry.day.color);popup.append(el('small','',`第 ${entry.number} 站`),el('strong','',String(entry.stop.name||'未命名行程')));
    if(entry.stop.dayLabel||entry.stop.date)popup.append(el('span','',String(entry.stop.dayLabel||entry.stop.date)));
    marker.bindPopup(popup,{autoPan:false,closeButton:true});
    button.addEventListener('click',()=>marker.openPopup());
    marker.addTo(markerLayer);markers.set(entry.id,{leaflet:marker,button,host});
   }
-  applySelection();
+  renderLegend();applySelection();
   if(focused&&markers.has(focused))markers.get(focused).button.focus({preventScroll:true});
   report();
  }
@@ -135,6 +147,7 @@ export function mountRouteMap(container,options={}){
   update(next={}){
    if(destroyed)return;
    config={...config,...next};model=buildRouteMapModel(config.stops);
+   renderLegend();
    const key=geometryKey(model),geometryChanged=key!==lastGeometry;
    const presentation=presentationKey(model);
    if(presentation!==lastPresentation)render();else{applySelection();report();}

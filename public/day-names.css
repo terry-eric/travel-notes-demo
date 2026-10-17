@@ -7,3 +7,9 @@
 .day-name-save:disabled,.day-name-input:disabled{opacity:.6;cursor:wait}
 .day-name-heading{margin:0;font-size:18px;font-weight:600;line-height:1.6;color:var(--ink,#27423a);overflow-wrap:anywhere;min-width:0}
 @media screen and (max-width:600px){.day-name-form{width:100%;gap:6px}.day-name-save{padding-inline:10px}.day-name-heading{font-size:17px}}
+
+.day-name-form{position:relative;align-items:center;padding-bottom:0}.day-name-input{border-color:transparent;background:transparent;padding:8px 3px;font-size:20px;transition:background 150ms cubic-bezier(.2,0,0,1),border-color 150ms cubic-bezier(.2,0,0,1)}
+.day-name-input:hover{background:#edf3e9}.day-name-input:focus{background:#fff;border-color:var(--green);padding-inline:8px;outline:none}.day-name-cancel{min-height:40px;border:0;border-radius:6px;background:transparent;color:var(--muted);font:inherit;font-size:12px;cursor:pointer;padding:6px}
+.day-name-hint{position:absolute;top:calc(100% + 2px);left:5px;font-size:10px;line-height:1.4;color:var(--muted);display:none;pointer-events:none}.day-name-form:focus-within .day-name-hint{display:block}
+@media(max-width:600px){.day-name-input{font-size:18px}.day-name-hint{font-size:10px}}
+@media(prefers-reduced-motion:reduce){.day-name-input{transition:none}}

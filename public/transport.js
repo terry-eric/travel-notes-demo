@@ -48,18 +48,18 @@ export function clockMinutes(value){
  const m=/^(\d{1,2}):(\d{2})$/.exec((value||'').trim());
  return m&&+m[1]<24&&+m[2]<60?+m[1]*60+ +m[2]:null;
 }
-export function pushSchedule(stops,start){
- let changed=0,reason='';
+export function pushSchedule(stops,start,{exact=false}={}){
+ let changed=0,reason='';const fixedNotes=[];
  if(start===0)return {changed,reason:'已儲存交通時間；第一站請自行設定抵達時間。'};
  for(let i=start;i<stops.length;i++){
   const prev=stops[i-1],current=stops[i],time=clockMinutes(prev.time),travel=savedTravelMinutes(stops,i);
   if(time===null||!Number.isInteger(prev.duration)||travel===null){reason=`「${time===null||!Number.isInteger(prev.duration)?prev.name:current.name}」尚缺${time===null?'明確時間（HH:MM）':!Number.isInteger(prev.duration)?'停留時間':'交通時間'}，後續保留原安排。`;break;}
   const arrival=time+prev.duration+travel;
-  if(current.live){const fixed=/^(\d{1,2}:\d{2})(?:\s|$)/.exec(current.time||'');const at=fixed?clockMinutes(fixed[1]):null;reason=at!==null&&arrival>at?`預計抵達會晚於「${current.name}」的固定時間，請縮短前段行程。`:'行程時間固定，保留原安排。';break;}
+  if(current.live){const fixed=/^(\d{1,2}:\d{2})(?:\s|$)/.exec(current.time||'');const at=fixed?clockMinutes(fixed[1]):null;reason=at!==null&&arrival>at?`預計抵達會晚於「${current.name}」的固定時間，請縮短前段行程。`:'行程時間固定，保留原安排。';if(!exact)break;fixedNotes.push(reason);reason='';continue;}
   if(arrival>=1440){reason='順延將跨過午夜，後續保留原安排，請調整當天行程。';break;}
   const planned=clockMinutes(current.time);
-  if(planned===null){reason=`「${current.name}」尚未設定明確時間（HH:MM），後續保留原安排。`;break;}
-  if(arrival>planned){current.time=String(Math.floor(arrival/60)).padStart(2,'0')+':'+String(arrival%60).padStart(2,'0');changed++;}
+  if(planned===null&&!exact){reason=`「${current.name}」尚未設定明確時間（HH:MM），後續保留原安排。`;break;}
+  if(arrival>planned||exact&&arrival!==planned){current.time=String(Math.floor(arrival/60)).padStart(2,'0')+':'+String(arrival%60).padStart(2,'0');changed++;}
  }
- return {changed,reason};
+ return {changed,reason:[...new Set([...fixedNotes,reason].filter(Boolean))].join(' ')};
 }

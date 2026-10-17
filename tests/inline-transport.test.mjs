@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {validateTransportInput,applyManualTransport,renderInlineTransportRow} from '../public/inline-transport.js';
+import {validateTransportInput,applyManualTransport,renderInlineTransportRow,applyTimelineTime} from '../public/inline-transport.js';
 import {legSignature,savedTravelMinutes,clearStaleTravel} from '../public/transport.js';
 import {moveStop} from '../public/reorder.js';
 import {mergeTrip} from '../public/merge.js';
@@ -52,4 +52,47 @@ test('viewer rows expose route viewing without an editable control; malicious dr
  const editor=renderInlineTransportRow(stops,1,{canEdit:true,draft:{mode:'walking',minutes:'\"><img src=x>'}});
  assert.doesNotMatch(editor,/<img\b/);assert.match(editor,/&quot;&gt;&lt;img/);assert.match(editor,/min="0" max="1440"/);
  assert.equal(renderInlineTransportRow(stops,0,{canEdit:true}), '');
+});
+
+test('traffic is a clickable summary until editing starts, with no always-visible save control',()=>{
+ const stops=fixture()[0].stops;
+ const idle=renderInlineTransportRow(stops,1,{canEdit:true});
+ assert.match(idle,/data-transport-edit="1"/);assert.doesNotMatch(idle,/<form|<input|<select|儲存/);
+ const open=renderInlineTransportRow(stops,1,{canEdit:true,editing:true});
+ assert.match(open,/data-transport-form="1"/);assert.match(open,/type="submit"[^>]*>完成/);assert.match(open,/data-transport-cancel="1"/);
+});
+
+test('next arrival follows departure plus commute in both directions while fixed bookings stay put',()=>{
+ const days=fixture(),first=applyManualTransport(days,0,'b',{mode:'walking',minutes:'30'});
+ assert.equal(first.days[0].stops[1].time,'10:30');
+ const shorter=applyManualTransport(first.days,0,'b',{mode:'walking',minutes:'6'});
+ assert.equal(shorter.days[0].stops[1].time,'10:06');
+ assert.equal(shorter.days[0].stops[2].time,'12:00');
+ const later=applyTimelineTime(shorter.days,0,'a',{time:'09:20',hours:'0',minutes:'30'});
+ assert.equal(later.days[0].stops[1].time,'09:56');
+ assert.equal(later.days[0].stops[2].time,'12:00');
+});
+
+test('exact calculation fills an ordinary unplanned arrival without changing a fixed unknown time',()=>{
+ const days=fixture();days[0].stops[1].time='待安排';days[0].stops[2].time='預約時間待確認';
+ const result=applyManualTransport(days,0,'b',{mode:'walking',minutes:'6'});
+ assert.equal(result.days[0].stops[1].time,'10:06');
+ assert.equal(result.days[0].stops[2].time,'預約時間待確認');
+ assert.equal(days[0].stops[1].time,'待安排');
+});
+
+test('exterior time/stay edits clone the snapshot, preserve fixed anchors and stop at missing route duration',()=>{
+ const days=fixture();days[0].stops[1].travelMinutes=6;days[0].stops[1].travelSignature=legSignature(days[0].stops,1);
+ days[0].stops[2].travelMinutes=20;days[0].stops[2].travelSignature=legSignature(days[0].stops,2);
+ const result=applyTimelineTime(days,0,'a',{time:'09:30',hours:'1',minutes:'15'});
+ assert.equal(days[0].stops[0].time,'09:00');assert.equal(days[0].stops[0].duration,60);
+ assert.equal(result.days[0].stops[0].time,'09:30');assert.equal(result.days[0].stops[0].duration,75);
+ assert.equal(result.days[0].stops[1].time,'10:51');assert.equal(result.days[0].stops[2].time,'12:00');
+ assert.throws(()=>applyTimelineTime(days,0,'a',{time:'25:00',hours:'1',minutes:'0'}),/開始時間/);
+ assert.throws(()=>applyTimelineTime(days,0,'a',{time:'09:00',hours:'24',minutes:'15'}));
+ assert.throws(()=>applyTimelineTime(days,0,'missing',{time:'09:00',hours:'1',minutes:'0'}),/找不到/);
+ const flight=structuredClone(days);flight[0].stops[0].kind='flight';
+ assert.throws(()=>applyTimelineTime(flight,0,'a',{time:'09:00',hours:'1',minutes:'0'}),/機票/);
+ const legacy=structuredClone(days);legacy[0].stops[0].time='上午自由活動';
+ assert.equal(applyTimelineTime(legacy,0,'a',{time:'上午自由活動',hours:'0',minutes:'0'}).days[0].stops[0].duration,0);
 });

@@ -19,7 +19,7 @@ export function createDemoState(){
  Object.assign(days[1],{title:'嵐山的綠意',sub:'竹林・河岸・休息',intro:'用幾個景點練習交通分鐘數與時間順延。',stops:[
   stop('demo-bamboo','09:30','竹林小徑','Arashiyama Bamboo Grove Kyoto',60,'景點','外部 Google Maps 連結可以直接開啟。'),
   stop('demo-bridge','11:00','渡月橋','Togetsukyo Bridge Kyoto',45,'散步','兩站間的分鐘數可自行輸入。'),
-  stop('demo-lunch','12:30','河邊午餐','Arashiyama Kyoto',75,'美食','試試交通時間「儲存並順延」。')
+  stop('demo-lunch','12:30','河邊午餐','Arashiyama Kyoto',75,'美食','點擊交通分鐘數，按「完成」更新後續時間。')
  ]});
  days[1].stops[1].travelMinutes=15;days[1].stops[1].travelSignature=legSignature(days[1].stops,1);
  Object.assign(days[2],{title:'城市裡的最後一天',sub:'市場・書店・返程',intro:'先保留有預約的項目，再安排自由活動。',stops:[

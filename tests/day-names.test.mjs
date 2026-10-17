@@ -31,14 +31,16 @@ test('renaming clones the whole snapshot and changes only one day title', () => 
  assert.throws(() => renameDay(null, 0, '名稱'));
 });
 
-test('editors get an explicit save form; viewers get escaped read-only headings', () => {
+test('editable day names save on Enter or blur without a permanent save button; viewers get escaped headings', () => {
  const title = '"><img src=x onerror="alert(1)">';
  const editor = renderDayName({ title }, 0, { canEdit: true });
  assert.match(editor, /<form[^>]*data-day-name-form[^>]*data-day-index="0"/);
  assert.match(editor, /name="dayName"/);
  assert.match(editor, /for="day-name-0"/);
  assert.match(editor, /id="day-name-0"/);
- assert.match(editor, /type="submit">儲存名稱/);
+ assert.doesNotMatch(editor, /type="submit"|儲存名稱/);
+ assert.match(editor, /Enter 或離開欄位會自動儲存/);
+ assert.match(editor, /data-day-name-cancel hidden/);
  assert.match(editor, /maxlength="120"/);
  assert.match(editor, /&quot;&gt;&lt;img/);
  assert.doesNotMatch(editor, /<img|<script|<button[^>]*>.*<input/s);
