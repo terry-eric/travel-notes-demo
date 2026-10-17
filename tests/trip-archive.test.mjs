@@ -54,15 +54,42 @@ test('lost replies are safe to retry, archived creation retries do not restore, 
  }finally{DB.close();}
 });
 
-test('archive frees active capacity and restore respects the atomic 100 active trip limit',async()=>{
+test('the owned record limit includes archived trips; restoring existing trips and replaying creation remain available',async()=>{
  const DB=localDatabase(),env={DB,OWNER_EMAIL:legacyOwner};try{
-  const first=await create(env),id=first.trip.id;
+  const originalBody=bodyFor(),first=await create(env,originalBody),id=first.trip.id;
   const inserts=Array.from({length:99},()=>DB.prepare('INSERT INTO itineraries (id,owner_email,title,start_date,end_date,timezone,payload,previous,revision,mutation_id,created_at,updated_at) SELECT ?,owner_email,title,start_date,end_date,timezone,payload,previous,revision,mutation_id,created_at,updated_at FROM itineraries WHERE id=?').bind(crypto.randomUUID(),id));await DB.batch(inserts);
   assert.equal((await catalogue(env)).trips.length,100);
   assert.equal((await handleTrips(request('/api/trips','POST',bodyFor()),env)).status,400);
-  assert.equal((await remove(env,id,0)).status,200);const replacement=await create(env);assert.equal((await catalogue(env)).trips.length,100);
-  assert.equal((await restore(env,id,1)).status,400);assert.equal((await catalogue(env)).deletedTrips[0].id,id);
-  assert.equal((await remove(env,replacement.trip.id,0)).status,200);assert.equal((await restore(env,id,1)).status,200);assert.equal((await catalogue(env)).trips.length,100);
+  const replay=await handleTrips(request('/api/trips','POST',originalBody),env);assert.equal(replay.status,200);assert.equal((await replay.json()).trip.id,id);
+  assert.equal((await remove(env,id,0)).status,200);assert.equal((await catalogue(env)).trips.length,99);
+  const blocked=await handleTrips(request('/api/trips','POST',bodyFor()),env);assert.equal(blocked.status,400);assert.match((await blocked.json()).error,/包含已刪除/);
+  assert.equal((await handleTrips(request('/api/trips','POST',originalBody),env)).status,409);
+  assert.equal((await restore(env,id,1)).status,200);assert.equal((await catalogue(env)).trips.length,100);
+  assert.equal((await DB.prepare('SELECT COUNT(*) AS count FROM itineraries WHERE owner_email=?').bind(alice).first()).count,100);
+  assert.equal((await create(env,bodyFor(),bob)).trip.title,'我的旅行');
+ }finally{DB.close();}
+});
+
+test('concurrent creation at the total record boundary cannot exceed the account cap, even with archived records',async()=>{
+ const DB=localDatabase(),env={DB,OWNER_EMAIL:legacyOwner};try{
+  const first=await create(env),id=first.trip.id;
+  await DB.batch(Array.from({length:98},()=>DB.prepare('INSERT INTO itineraries (id,owner_email,title,start_date,end_date,timezone,payload,previous,revision,mutation_id,created_at,updated_at,deleted_at) SELECT ?,owner_email,title,start_date,end_date,timezone,payload,previous,revision,mutation_id,created_at,updated_at,? FROM itineraries WHERE id=?').bind(crypto.randomUUID(),'archived',id)));
+  const responses=await Promise.all(Array.from({length:2},()=>handleTrips(request('/api/trips','POST',bodyFor()),env)));
+  assert.deepEqual(responses.map(response=>response.status).sort(),[201,400]);
+  assert.equal((await DB.prepare('SELECT COUNT(*) AS count FROM itineraries WHERE owner_email=?').bind(alice).first()).count,100);
+  const list=await catalogue(env);assert.equal(list.trips.length,2);assert.equal(list.deletedTrips.length,98);
+ }finally{DB.close();}
+});
+
+test('restoring pre-existing archived trips still enforces the active record cap without deleting data',async()=>{
+ const DB=localDatabase(),env={DB,OWNER_EMAIL:legacyOwner};try{
+  const first=await create(env),id=first.trip.id;
+  await DB.batch(Array.from({length:100},()=>DB.prepare('INSERT INTO itineraries (id,owner_email,title,start_date,end_date,timezone,payload,previous,revision,mutation_id,created_at,updated_at) SELECT ?,owner_email,title,start_date,end_date,timezone,payload,previous,revision,mutation_id,created_at,updated_at FROM itineraries WHERE id=?').bind(crypto.randomUUID(),id)));
+  assert.equal((await remove(env,id,0)).status,200);assert.equal((await restore(env,id,1)).status,400);
+  assert.equal((await catalogue(env)).deletedTrips[0].id,id);
+  const other=(await catalogue(env)).trips[0];assert.equal((await remove(env,other.id,other.revision)).status,200);
+  assert.equal((await restore(env,id,1)).status,200);assert.equal((await catalogue(env)).trips.length,100);
+  assert.equal((await DB.prepare('SELECT COUNT(*) AS count FROM itineraries WHERE owner_email=?').bind(alice).first()).count,101);
  }finally{DB.close();}
 });
 

@@ -1,4 +1,4 @@
-import {appBase,apiPath,tripApiPath,selectedTripId,demoMode} from './runtime.js';
+import {appBase,apiPath,tripApiPath,selectedTripId,demoMode,googleAuth} from './runtime.js';
 import {initTripManager} from './trip-manager.js';
 import {initSharing} from './sharing.js';
 import {parseMapsShare} from './maps-link.js';
@@ -17,7 +17,7 @@ import {createDraftStore} from './drafts.js';
 import {initConflicts} from './conflicts.js';
 import {createMapFrame,placeEmbedUrl} from './map-frame.js';
 import {durationParts,durationMinutes,formatDuration} from './duration.js';
-import {tagCategory,tagOptions} from './tags.js';
+import {tagCategory,tagOptions,renderCardTag,applyStopTag} from './tags.js';
 import {renderStopAvatar,stopAvatarLabel} from './stop-avatar.js';
 import {initReorder,initOverviewReorder,moveStop,moveStopBetweenDays} from './reorder.js';
 import {initImport,insertImported} from './import.js';
@@ -28,11 +28,13 @@ let embedKey='',embedState='loading',embedRequest=null,authExpired=false,transpo
 let days=[],currentTrip=null,previous=null,revision=0,ready=false,busy=false,editing=null,pending=null,conflict=false;
 let access={canEdit:false,canShare:false};
 let travelCache=null,cacheEmail='',identityEpoch=0,permissionEpoch=0,bootRequest=null,loadRequest=null,sessionCheck=null;
-let renameSyncNeeded=false;
+let renameSyncNeeded=false,signingOut=false;
 const sessionChannel=typeof BroadcastChannel==='function'?new BroadcastChannel('trip-session:'+appBase):null;
 const tripId=selectedTripId;
 let editorScope=null,editorDirty=false,newStopId='',transportScope=null,transportDirty=false,stayDraft=null,draftStore=null,recovery=null;
 let transportDraft=null,transportEditorId='',timelineEditorId='';
+let tagDraft=null;
+const tagScopes=new WeakMap();
 const initialRoute=readRoute(location.href);
 let activeDay=initialRoute.day,activeStop=initialRoute.stop,currentPage=initialRoute.page;
 let editorReadOnly=false,dragging=false;
@@ -52,9 +54,9 @@ function applyTripRole(role){
  access={...access,role,canEdit:role!=='viewer',canShare:role==='owner'};sharing.setSession(access);tripManager.setSession(access);
  if(!access.canEdit){
   persistDraft();
-  if(editorDirty||transportDirty||stayDraft||dayNameDraft||importer.dirty||pending||conflict){
+  if(editorDirty||transportDirty||stayDraft||dayNameDraft||tagDraft||importer.dirty||pending||conflict){
    recovery=draftStore?.read()||recovery;
-   editorDirty=transportDirty=false;editorScope=transportScope=null;transportDraft=null;stayDraft=null;dayNameDraft=null;editing=null;pending=null;conflict=false;
+   editorDirty=transportDirty=false;editorScope=transportScope=null;transportDraft=null;stayDraft=null;dayNameDraft=null;tagDraft=null;editing=null;pending=null;conflict=false;
    if($('import-dialog').open)importer.close();
    for(const id of ['editor','transport-dialog','conflict-dialog'])if($(id).open)$(id).close();
    $('draft-recovery').hidden=!recovery;
@@ -64,7 +66,7 @@ function applyTripRole(role){
  showPage(currentPage,{record:false,focus:false});setDay(activeDay,activeStop);lock();
  notice(access.canEdit?'你的行程權限已更新，可以一起編輯。':'權限已改成只能查看，未儲存的草稿保留在這個裝置。');
 }
-function canSwitchTrip(){return !busy&&!pending&&!conflict&&!dragging&&!editorDirty&&!transportDirty&&!stayDraft&&!dayNameDraft&&!importer.dirty&&!recovery;}
+function canSwitchTrip(){return !busy&&!pending&&!conflict&&!dragging&&!editorDirty&&!transportDirty&&!stayDraft&&!dayNameDraft&&!tagDraft&&!importer.dirty&&!recovery;}
 function bindAccount(session){
  const email=session.email.toLowerCase();
  if(access.email&&access.email.toLowerCase()!==email){forgetAccount();draftStore=null;recovery=null;location.reload();return;}
@@ -83,7 +85,7 @@ function restorePlaces(){
 }
 function forgetAccount(){
  identityEpoch++;renameSyncNeeded=false;travelCache?.clearAccount();clearUnavailableTrip();tripManager.clear();travelCache=null;
- draftStore=null;recovery=null;editorDirty=transportDirty=false;editorScope=transportScope=null;transportDraft=null;transportEditorId='';timelineEditorId='';editing=null;stayDraft=null;dayNameDraft=null;pending=null;conflict=false;
+ draftStore=null;recovery=null;editorDirty=transportDirty=false;editorScope=transportScope=null;transportDraft=null;transportEditorId='';timelineEditorId='';editing=null;stayDraft=null;dayNameDraft=null;tagDraft=null;pending=null;conflict=false;
  if($('import-dialog').open)importer.close();for(const id of ['editor','transport-dialog','conflict-dialog'])if($(id).open)$(id).close();$('draft-recovery').hidden=true;
  access={canEdit:false,canShare:false};cacheEmail='';embedKey='';embedState='auth';resolvedPlaces.clear();placeErrors.clear();placeRequests.clear();busy=false;lock();
 }
@@ -133,7 +135,7 @@ async function bootAccount(epoch){
 const conflictUI=initConflicts({onResolve:resolveConflicts,onLater:persistDraft,onChoice:choices=>{if(pending?.merge){pending.merge.choices=choices;persistDraft();}}});
 let syncInterrupted=false;
 const autoSync=createAutoSync({
- getState:()=>({ready,busy:busy||tripManager.pending,pending,conflict,revision,editing:dragging||!!dayNameDraft||document.activeElement?.matches('[name="dayName"]')||!!transportEditorId||!!timelineEditorId||$('editor').open||$('import-dialog').open||$('transport-dialog').open||transportDirty||!!stayDraft}),
+ getState:()=>({ready,busy:busy||tripManager.pending,pending,conflict,revision,editing:dragging||!!dayNameDraft||!!tagDraft||document.activeElement?.matches('[name="dayName"],[data-card-tag]')||!!transportEditorId||!!timelineEditorId||$('editor').open||$('import-dialog').open||$('transport-dialog').open||transportDirty||!!stayDraft}),
  async fetchSnapshot(version){
   const epoch=identityEpoch,permissions=permissionEpoch,isCurrent=()=>epoch===identityEpoch&&permissions===permissionEpoch;
   try{return await fetchTripUpdate(version,fetch,applyTripRole,isCurrent);}catch(error){if(isCurrent())throw error;return null;}
@@ -149,9 +151,9 @@ const autoSync=createAutoSync({
  }
 });
 const importer=initImport({canWrite:()=>canChange()&&!transportDirty&&!stayDraft,getScope:scopeSnapshot,onSave:importRows,onChange:persistDraft,onClose:()=>void autoSync.tick()});
-initReorder($('timeline'),{canStart:()=>canChange()&&!transportDirty&&!stayDraft&&!timelineEditorId&&!transportEditorId,onStart:()=>{dragging=true;return {...scopeSnapshot(),day:activeDay};},onFinish:()=>{dragging=false;void autoSync.tick();},onMove:reorderStop});
+initReorder($('timeline'),{canStart:()=>canChange()&&!transportDirty&&!stayDraft&&!timelineEditorId&&!transportEditorId,onStart:()=>{dragging=true;return {...scopeSnapshot(),day:activeDay};},onFinish:()=>{dragging=false;lock();void autoSync.tick();},onMove:reorderStop});
 function canSortOverview(){return canChange()&&!dragging&&!editorDirty&&!$('editor').open&&!$('import-dialog').open&&!$('transport-dialog').open&&!importer.dirty&&!transportDirty&&!stayDraft&&!timelineEditorId&&!transportEditorId&&!dayNameDraft&&!document.activeElement?.matches('[name="dayName"]');}
-initOverviewReorder($('board'),{canStart:canSortOverview,onStart:()=>{dragging=true;return scopeSnapshot();},onFinish:()=>{dragging=false;void autoSync.tick();},onMove:moveOverviewStop});
+initOverviewReorder($('board'),{canStart:canSortOverview,onStart:()=>{dragging=true;return scopeSnapshot();},onFinish:()=>{dragging=false;lock();void autoSync.tick();},onMove:moveOverviewStop});
 const placeFrame=createMapFrame({getFrame:()=>$('map'),status:$('place-map-status'),isActive:()=>currentPage==='map'});
 const transportFrame=createMapFrame({getFrame:()=>$('transport-map'),status:$('transport-placeholder'),isActive:()=>$('transport-dialog').open});
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -186,6 +188,7 @@ function durationPicker(value,label,prefix){
 function readStay(form){return durationMinutes(form.elements.durationHours.value,form.elements.durationMinutes.value);}
 const pageLabels={trips:'我的旅行',overview:'行程總覽',daily:'每日行程',map:'旅途地圖',notes:'出發前筆記'};
 function showPage(page,{record=true,focus=true}={}){
+ if(tagDraft&&!restoringDraft&&page!==currentPage){notice('標籤尚未儲存，請先重試儲存。');return;}
  if(dayNameDraft&&!restoringDraft&&page!==currentPage){notice('請先儲存或取消每日名稱。');return;}
  if(stayDraft&&!restoringDraft&&page!==currentPage){notice('請先完成或取消時間編輯。');return;}
  if(page!==currentPage&&!transportDirty){transportEditorId='';timelineEditorId='';}
@@ -209,7 +212,7 @@ function showPage(page,{record=true,focus=true}={}){
 }
 function mapStops(all=false){return days.flatMap((day,d)=>!all&&d!==activeDay?[]:day.stops.map((stop,index)=>({...stop,dayIndex:d,stopIndex:index,dayLabel:day.title||'第 '+(d+1)+' 天',date:day.isoDate||day.date})));}
 function renderRouteMaps(){
- const selectionLocked=()=>!!dayNameDraft||transportDirty||!!stayDraft||editorDirty||importer.dirty||busy||!!pending||conflict;
+ const selectionLocked=()=>!!dayNameDraft||!!tagDraft||transportDirty||!!stayDraft||editorDirty||importer.dirty||busy||!!pending||conflict;
  const select=stop=>{if(selectionLocked()){renderRouteMaps();return;}setDay(stop.dayIndex,stop.stopIndex);showPage('map',{focus:false});};
  if(currentPage==='overview'&&days.length){const options={stops:mapStops(true),selectedId:days[activeDay]?.stops[activeStop]?.id,onSelect:select};overviewMap?overviewMap.update(options):overviewMap=mountRouteMap($('overview-route-map'),options);overviewMap.setVisible(true);}else overviewMap?.setVisible(false);
  if(currentPage==='map'&&days.length){const options={stops:mapStops(routeMapScope==='trip'),selectedId:days[activeDay]?.stops[activeStop]?.id,onSelect:select};routeMap?routeMap.update(options):routeMap=mountRouteMap($('itinerary-route-map'),options);routeMap.setVisible(true);}else routeMap?.setVisible(false);
@@ -232,7 +235,7 @@ function renderDateTabs(container,prefix,panel){
  });
 }
 function notice(message){$('toast').textContent=message;$('toast').hidden=false;clearTimeout(notice.timer);notice.timer=setTimeout(()=>$('toast').hidden=true,5000);}
-function canChange(){return !!tripId&&access.canEdit&&ready&&!busy&&!tripManager.pending&&!pending&&!conflict&&(!recovery||restoringDraft)&&!dayNameDraft;}
+function canChange(){return !!tripId&&access.canEdit&&ready&&!busy&&!tripManager.pending&&!pending&&!conflict&&(!recovery||restoringDraft)&&!dayNameDraft&&!tagDraft;}
 function lock(){
  document.body.classList.toggle('read-only',!access.canEdit);
  document.querySelectorAll('[data-write]').forEach(el=>el.disabled=!canChange());
@@ -248,7 +251,7 @@ function lock(){
  document.querySelectorAll('[data-close]').forEach(el=>el.disabled=busy);
  $('retry').disabled=busy;$('conflict-submit').disabled=busy;$('conflict-later').disabled=busy;
  $('draft-restore').disabled=!access.canEdit||!ready||busy||!recovery;$('draft-discard').disabled=busy;
- importer.lock(busy||!!pending||conflict||!!recovery||!!stayDraft);lockTransport();lockTimeline();lockDayNames();updateFlightEditor();
+ importer.lock(busy||!!pending||conflict||!!recovery||!!stayDraft||!!tagDraft);lockTransport();lockTimeline();lockDayNames();lockCardTags();updateFlightEditor();
 }
 function bindDraftStore(){
  let storage,tabId;
@@ -266,8 +269,8 @@ function persistDraft(){
  const editor=editorDirty&&editorScope?{scope:editorScope,editing,newStopId,fields:editorFields()}:null;
  const transport=transportDirty&&transportScope&&transportDraft?{scope:transportScope,...transportDraft}:null;
  const imported=importer.snapshot();
- if(!editor&&!transport&&!stayDraft&&!dayNameDraft&&!pending&&!imported)return recovery?true:draftStore.clear();
- const saved=draftStore.write({tripId,editor,transport,stay:stayDraft,dayName:dayNameDraft,pending,imported});
+ if(!editor&&!transport&&!stayDraft&&!dayNameDraft&&!tagDraft&&!pending&&!imported)return recovery?true:draftStore.clear();
+ const saved=draftStore.write({tripId,editor,transport,stay:stayDraft,dayName:dayNameDraft,tag:tagDraft,pending,imported});
  if(!saved){const warning='此瀏覽器無法保存草稿，請先儲存再離開';$('save-status').textContent=warning;if(transportDirty)inlineTransportFeedback(inlineTransportForm(),warning,true);if($('editor').open)$('form-error').textContent=warning;if($('transport-dialog').open)$('transport-feedback').textContent=warning;if($('conflict-dialog').open)conflictUI.message(warning);}
  return saved;
 }
@@ -294,8 +297,35 @@ async function resolveConflicts(choices){
  const merged=mergedSchedule(result.days,latest.days);pending.base=clone(latest.days);pending.days=merged.days;pending.revision=latest.revision;pending.mutationId=crypto.randomUUID();pending.merge=null;pending.message='已依你的選擇合併並儲存。'+merged.reason;conflict=false;conflictUI.close();persistDraft();await commit(null,null,null,null,true);
 }
 
+function cardTagValue(stop){return tagDraft?.id===stop.id?tagDraft.value:stop.tag||'其他';}
+function cardTag(stop,day){return renderCardTag(stop,day,{canEdit:access.canEdit,value:cardTagValue(stop)});}
+function canEditCardTag(field){
+ return !!tripId&&access.canEdit&&ready&&!busy&&!tripManager.pending&&!pending&&!conflict&&(!recovery||restoringDraft)&&!dayNameDraft&&!transportDirty&&!stayDraft&&!timelineEditorId&&!transportEditorId&&!editorDirty&&!importer.dirty&&!dragging&&!$('editor').open&&!$('import-dialog').open&&!$('transport-dialog').open&&(!tagDraft||tagDraft.id===field.dataset.tagId);
+}
+function previewCardTag(id,value,message=''){
+ for(const field of document.querySelectorAll('[data-card-tag]'))if(field.dataset.tagId===id){
+  field.value=value;
+  const card=field.closest('[data-stop-id],[data-overview-stop-id]');
+  if(card){for(const className of [...card.classList])if(className.startsWith('category-'))card.classList.remove(className);card.classList.add('category-'+tagCategory(value));}
+  const status=field.closest('.card-tag-control').querySelector('.card-tag-status');status.textContent=message;
+ }
+}
+function lockCardTags(){
+ for(const field of document.querySelectorAll('[data-card-tag]')){
+  field.disabled=!canEditCardTag(field);
+  if(tagDraft?.id===field.dataset.tagId)previewCardTag(tagDraft.id,tagDraft.value,conflict?'待處理衝突':busy?'儲存中…':pending?'尚未儲存，請重試':'尚未儲存');
+ }
+}
+async function saveCardTag(field){
+ if(!field.isConnected||!canEditCardTag(field))return;
+ const day=Number(field.dataset.tagDay),id=field.dataset.tagId,scope=tagDraft?.id===id?tagDraft.scope:tagScopes.get(field)||scopeSnapshot();let changed;
+ try{changed=applyStopTag(scope.days,day,id,field.value);}catch(error){field.value=days[day]?.stops.find(stop=>stop.id===id)?.tag||'其他';notice(error.message);return;}
+ if(!changed.changed){tagDraft=null;persistDraft();previewCardTag(id,field.value);lock();void autoSync.tick();return;}
+ tagDraft={scope,day,id,value:changed.days[day].stops[changed.index].tag};persistDraft();previewCardTag(id,tagDraft.value,'儲存中…');
+ await commit(changed.days,'已更新行程標籤',day,changed.index,false,false,scope,null,id);
+}
 function renderBoard(){
- $('board').innerHTML=days.map((d,i)=>`<article class="day-card day-summary" data-overview-day="${i}" style="--day:${esc(d.color)};--tint:${esc(d.tint)}">${renderDayName(d,i,{canEdit:access.canEdit}).replaceAll("day-name-"+i,"overview-day-name-"+i)}<button class="day-choice" data-open-day="${i}" aria-label="查看第 ${i+1} 天 ${esc(d.date)} 行程"><span class="day-number">第 ${i+1} 天</span><span class="card-date">${esc(d.date)}</span></button><div class="day-items"><div class="card-stops">${d.stops.map((s,j)=>`<button class="mini-stop ${s.live===true?'has-stop-avatar ':''}category-${tagCategory(s.tag)}" data-overview-stop-id="${esc(s.id)}" data-details="${j}" data-owner="${i}" data-day="${i}" data-stop="${j}" ${access.canEdit?'title="長按或拖曳調整日期與順序；Alt＋方向鍵也可調整"':''} aria-pressed="${activeDay===i&&activeStop===j}"><time>${esc(s.time)}</time><strong>${esc(s.name)}</strong><span class="tag">${esc(s.tag||'其他')}</span>${renderStopAvatar(s)}</button>`).join('')||'<p class="empty">尚未安排行程</p>'}</div><button class="add-day" data-add="${i}" data-write>＋ 新增行程</button></div></article>`).join('');lock();
+ $('board').innerHTML=days.map((d,i)=>`<article class="day-card day-summary" data-overview-day="${i}" style="--day:${esc(d.color)};--tint:${esc(d.tint)}">${renderDayName(d,i,{canEdit:access.canEdit}).replaceAll("day-name-"+i,"overview-day-name-"+i)}<button class="day-choice" data-open-day="${i}" aria-label="查看第 ${i+1} 天 ${esc(d.date)} 行程"><span class="day-number">第 ${i+1} 天</span><span class="card-date">${esc(d.date)}</span></button><div class="day-items"><div class="card-stops">${d.stops.map((s,j)=>`<article class="mini-stop ${s.live===true?'has-stop-avatar ':''}category-${tagCategory(cardTagValue(s))}" data-overview-stop-id="${esc(s.id)}" data-details="${j}" data-owner="${i}" data-day="${i}" data-stop="${j}" role="button" tabindex="0" aria-label="${esc(s.name)}：查看行程詳情" ${access.canEdit?'title="長按或拖曳調整日期與順序；Alt＋方向鍵也可調整"':''} aria-pressed="${activeDay===i&&activeStop===j}"><time>${esc(s.time)}</time><strong>${esc(s.name)}</strong>${cardTag(s,i)}${renderStopAvatar(s)}</article>`).join('')||'<p class="empty">尚未安排行程</p>'}</div><button class="add-day" data-add="${i}" data-write>＋ 新增行程</button></div></article>`).join('');lock();
 }
 function renderTransportRow(stops,index){
  const draft=transportDirty&&transportDraft?.day===activeDay&&transportDraft.id===stops[index]?.id?transportDraft:null;
@@ -386,6 +416,7 @@ function lockTimeline(){
  for(const form of $('timeline').querySelectorAll('[data-stay-form]')){for(const field of form.querySelectorAll('input,select,button'))field.disabled=!canChange()||transportDirty||editorDirty||importer.dirty;form.querySelector('[data-timeline-cancel]').disabled=busy||!!pending||conflict;}
 }
 function setDay(index,stop=0){
+ if(tagDraft&&!restoringDraft){notice('標籤尚未儲存，請先重試儲存。');return;}
  if(dayNameDraft&&!restoringDraft){notice('請先儲存或取消每日名稱。');return;}
  if(stayDraft&&!restoringDraft&&index!==activeDay){notice('請先完成或取消時間編輯。');return;}
  if(index!==activeDay){transportEditorId='';timelineEditorId='';}
@@ -394,7 +425,7 @@ function setDay(index,stop=0){
  const d=days[index];
  renderDateTabs('day-tabs','tab','day-panel');
  $('day-intro').innerHTML=`<div class="day-edit-heading">${renderDayName(d,index,{canEdit:access.canEdit}).replaceAll("day-name-"+index,"daily-day-name-"+index)}<button class="primary" data-add="${index}" data-write>＋ 新增行程</button></div><p>${esc(d.intro||'')}</p>`;
- $('timeline').innerHTML=d.stops.map((s,j)=>`${renderTransportRow(d.stops,j)}<article class="stop timeline-stop ${s.live===true?'has-stop-avatar ':''}${s.kind==='flight'?'stop-flight ':''}category-${tagCategory(s.tag)} ${j===activeStop?'selected':''}" id="stop-${j}" data-stop-id="${esc(s.id)}" data-reorder-card data-details="${j}" data-owner="${index}" role="button" tabindex="0" aria-label="${esc([s.name,stopAvatarLabel(s)].filter(Boolean).join('，'))}" aria-describedby="reorder-hint">${renderTimelineRail(s,j)}<div class="stop-body"><div class="stop-card-head"><span class="tag">${tagCategory(s.tag)==='concert'?'♫ ':''}${esc(s.tag||'其他')}</span>${renderStopAvatar(s)}</div><h3 class="stop-name">${esc(s.name)}</h3>${s.desc?`<p class="stop-description">${esc(s.desc).replace(/\n/g,'<br>')}</p>`:''}${s.kind==='flight'?flightCardSummary(s):''}</div></article>`).join('')||'<div class="empty-day"><h3>把喜歡的地方，加進今天。</h3><p>這一天還沒有行程。</p><button class="primary" data-add="'+index+'" data-write>＋ 新增第一個行程</button></div>';
+ $('timeline').innerHTML=d.stops.map((s,j)=>`${renderTransportRow(d.stops,j)}<article class="stop timeline-stop ${s.live===true?'has-stop-avatar ':''}${s.kind==='flight'?'stop-flight ':''}category-${tagCategory(cardTagValue(s))} ${j===activeStop?'selected':''}" id="stop-${j}" data-stop-id="${esc(s.id)}" data-reorder-card data-details="${j}" data-owner="${index}" role="button" tabindex="0" aria-label="${esc([s.name,stopAvatarLabel(s)].filter(Boolean).join('，'))}" aria-describedby="reorder-hint">${renderTimelineRail(s,j)}<div class="stop-body"><div class="stop-card-head">${cardTag(s,index)}${renderStopAvatar(s)}</div><h3 class="stop-name">${esc(s.name)}</h3>${s.desc?`<p class="stop-description">${esc(s.desc).replace(/\n/g,'<br>')}</p>`:''}${s.kind==='flight'?flightCardSummary(s):''}</div></article>`).join('')||'<div class="empty-day"><h3>把喜歡的地方，加進今天。</h3><p>這一天還沒有行程。</p><button class="primary" data-add="'+index+'" data-write>＋ 新增第一個行程</button></div>';
  $('reorder-hint').hidden=!access.canEdit;$('map-details').dataset.details=activeStop;$('map-details').dataset.owner=index;
  $('day-tip').textContent=d.tip;$('toolbar-add').dataset.add=index;renderMapStops();selectStop(activeStop);restoreStayInputs();lock();
 }
@@ -430,14 +461,14 @@ function renderPlaceMap(force=false){
  if(embedKey){$('map').hidden=false;placeFrame.load(placeEmbedUrl(destination,embedKey),'Google Maps：'+s.name,{force});}
  else{placeFrame.clear();$('map').hidden=true;$('place-map-status').hidden=false;$('place-map-status').textContent=mapsConfigMessage();}
 }
-function signIn(){if(appBase){location.reload();return;}location.assign('/signin-with-chatgpt?return_to='+encodeURIComponent(location.pathname+location.search));}
+function signIn(){if(demoMode){location.reload();return;}if(appBase||googleAuth){location.assign(appBase+'/login?return_to='+encodeURIComponent(location.pathname+location.search));return;}location.assign('/signin-with-chatgpt?return_to='+encodeURIComponent(location.pathname+location.search));}
 function clearUnavailableTrip(){
  routeMap?.destroy();overviewMap?.destroy();dailyRouteMap?.destroy();routeMap=overviewMap=dailyRouteMap=null;$('itinerary-route-map').replaceChildren();$('overview-route-map').replaceChildren();$('daily-route-map')?.replaceChildren();transportEditorId='';timelineEditorId='';
  const saved=persistDraft();ready=false;autoSync.stop();access={...access,canEdit:false,canShare:false};sharing.setSession(access);
  if(saved){
   // Keep the existing account/trip draft key for a later restoration, while
   // detaching this unavailable document so navigation cannot clear that draft.
-  draftStore=null;recovery=null;editorDirty=transportDirty=false;editorScope=transportScope=null;transportDraft=null;transportEditorId='';timelineEditorId='';editing=null;stayDraft=null;dayNameDraft=null;pending=null;conflict=false;
+  draftStore=null;recovery=null;editorDirty=transportDirty=false;editorScope=transportScope=null;transportDraft=null;transportEditorId='';timelineEditorId='';editing=null;stayDraft=null;dayNameDraft=null;tagDraft=null;pending=null;conflict=false;
   if($('import-dialog').open)importer.close();for(const id of ['editor','transport-dialog','conflict-dialog'])if($(id).open)$(id).close();
   $('draft-recovery').hidden=true;
  }
@@ -476,13 +507,14 @@ async function loadSnapshot(){
   $('sync-error-text').textContent=error.message;$('retry').textContent=authExpired?'重新登入':'重新連線';$('sync-error').hidden=false;
  }finally{if(epoch===identityEpoch){busy=false;lock();}}
 }
-async function commit(next,message,day=activeDay,stop=activeStop,retry=false,transport=false,scope=null,stayId=null){
+async function commit(next,message,day=activeDay,stop=activeStop,retry=false,transport=false,scope=null,stayId=null,tagId=null){
  if(conflict){showConflicts();return false;}
+ if(tagDraft&&!tagId&&!retry){notice('標籤尚未儲存，請先重試儲存。');return false;}
  if(transportDirty&&!transport&&!retry){notice('請先儲存或取消卡片之間的交通時間。');return false;}
  if(stayDraft&&!stayId&&!retry){notice('請先完成或取消時間編輯。');return false;}
  if(!tripId||!access.canEdit||!ready||busy)return false;
  if(scope?.tripId&&scope.tripId!==tripId||pending?.tripId&&pending.tripId!==tripId){notice('這份草稿屬於其他旅行，請回到原旅行儲存。');return false;}
- if(!retry)pending={tripId,base:clone(scope?.days||days),days:clearStaleTravel(next),revision:scope?.revision??revision,mutationId:crypto.randomUUID(),message,day,stop,transport,stayId};
+ if(!retry)pending={tripId,base:clone(scope?.days||days),days:clearStaleTravel(next),revision:scope?.revision??revision,mutationId:crypto.randomUUID(),message,day,stop,transport,stayId,tagId};
  const task=pending;if(!task)return false;const epoch=identityEpoch;busy=true;$('save-status').textContent='正在儲存…';lock();
  persistDraft();
  try{
@@ -501,6 +533,7 @@ async function commit(next,message,day=activeDay,stop=activeStop,retry=false,tra
   if(epoch!==identityEpoch)return false;
   if(!result)throw Error('同行者仍在更新行程，內容已保留，請稍後重試儲存。');
   cacheConfirmed(result);days=result.days;currentTrip=result.trip||currentTrip;previous=result.previous;revision=result.revision;renderTripMeta();pending=null;dayNameDraft=null;editorDirty=false;editorScope=null;transportDirty=false;transportScope=null;transportDraft=null;transportEditorId='';timelineEditorId='';recovery=null;$('draft-recovery').hidden=true;
+  if(task.tagId===tagDraft?.id)tagDraft=null;
   if(task.stayId&&stayDraft){delete stayDraft.values[task.stayId];if(!Object.keys(stayDraft.values).length)stayDraft=null;}
   if(stayDraft){recovery={stay:clone(stayDraft)};$('draft-recovery').hidden=false;}
   $('sync-error').hidden=true;$('save-status').textContent='已儲存至雲端';$('editor').close();if($('import-dialog').open)importer.close();editing=null;refresh(task.day,task.stop);persistDraft();notice(task.message);if($('transport-dialog').open){renderTransport();$('transport-feedback').textContent=task.message;}return true;
@@ -520,6 +553,7 @@ async function commit(next,message,day=activeDay,stop=activeStop,retry=false,tra
  finally{if(epoch===identityEpoch){busy=false;lock();}}
 }
 function openEditor(day,index=null,scope=null,view=false){
+ if(tagDraft&&!restoringDraft){notice('標籤尚未儲存，請先重試儲存。');return;}
  if(!view&&transportDirty){notice('請先儲存或取消卡片之間的交通時間。');return;}
  if(stayDraft&&!restoringDraft){notice('請先完成或取消時間編輯。');return;}
  if(!transportDirty){transportEditorId='';timelineEditorId='';}
@@ -581,8 +615,9 @@ async function importRows(rows,scope){
  await commit(next,'已匯入 '+rows.length+' 個行程',last.day,index,false,false,scope);
 }
 document.addEventListener('click',e=>{
+ if(e.target.closest('.card-tag-control'))return;
  const link=e.target.closest('[data-page-link]');if(link&&!e.ctrlKey&&!e.metaKey&&!e.shiftKey&&!e.altKey&&e.button===0){e.preventDefault();showPage(link.dataset.pageLink);return;}
- const action=e.target.closest('button,[data-reorder-card]');if(!action)return;
+ const action=e.target.closest('button,[data-reorder-card],[data-overview-stop-id]');if(!action)return;
  const menu=action.closest('.toolbar-more');if(menu)menu.open=false;
  if(action.disabled)return;
  if(action.hasAttribute('data-day-name-cancel')){cancelDayName(action.closest('[data-day-name-form]'));return;}
@@ -616,6 +651,15 @@ $('timeline').addEventListener('keydown',e=>{
  const card=e.target.closest('[data-reorder-card]');
  if(card&&e.target===card&&['Enter',' '].includes(e.key)){e.preventDefault();card.click();}
 });
+$('board').addEventListener('keydown',event=>{
+ const card=event.target.closest('[data-overview-stop-id]');
+ if(card&&event.target===card&&['Enter',' '].includes(event.key)){event.preventDefault();card.click();}
+});
+document.addEventListener('focusin',event=>{
+ const field=event.target.closest('[data-card-tag]');if(field&&canEditCardTag(field))tagScopes.set(field,tagDraft?.id===field.dataset.tagId?tagDraft.scope:scopeSnapshot());
+});
+document.addEventListener('focusout',event=>{if(event.target.matches('[data-card-tag]'))queueMicrotask(()=>void autoSync.tick());});
+document.addEventListener('change',event=>{const field=event.target.closest('[data-card-tag]');if(field)void saveCardTag(field);});
 for(const id of ['day-tabs','map-day-tabs'])$(id).addEventListener('keydown',e=>{
  const tab=e.target.closest('[data-tab]');
  if(!tab||!['ArrowLeft','ArrowRight','Home','End'].includes(e.key))return;
@@ -642,7 +686,7 @@ $('editor-form').addEventListener('submit',async e=>{
  delete stop.routeQuery;if(stop.q)stop.routeQuery=stop.q;else delete stop.placeId;
  delete stop.duration;let stay=readStay($('editor-form'));
  if($('field-kind').value==='flight'){
-  try{stop.kind='flight';stop.flight=sanitizeFlight(readFlightFields());const schedule=flightTripSchedule(stop.flight,currentTrip.timezone);if(schedule.date!==next[day].isoDate)throw Error('出發時間換算為旅行時區後是 '+schedule.date+'，請選擇相同的安排日期。');stop.time=schedule.time;stay=schedule.duration;stop.live=true;stop.tag='機票';stop.q=stop.flight.departureAirport;stop.routeQuery=stop.q;}catch(error){$('form-error').textContent=error.message;return;}
+  try{stop.kind='flight';stop.flight=sanitizeFlight(readFlightFields());const schedule=flightTripSchedule(stop.flight,currentTrip.timezone);if(schedule.date!==next[day].isoDate)throw Error('出發時間換算為旅行時區後是 '+schedule.date+'，請選擇相同的安排日期。');stop.time=schedule.time;stay=schedule.duration;stop.live=true;stop.tag=original.kind==='flight'?(original.tag||'機票'):'機票';stop.q=stop.flight.departureAirport;stop.routeQuery=stop.q;}catch(error){$('form-error').textContent=error.message;return;}
  }else{delete stop.kind;delete stop.flight;}
  if(stay!==undefined)stop.duration=stay;stop.tag=stop.tag||'行程';stop.time=stop.time||'待安排';
  if(editing)next[editing.day].stops.splice(editing.index,1);
@@ -675,12 +719,13 @@ $('search-maps').addEventListener('click',()=>{const field=$('field-q'),query=fi
 $('field-q').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();$('search-maps').click();}});
 $('editor').addEventListener('cancel',e=>{if(busy){e.preventDefault();return;}if(!pending&&!conflict){editorDirty=false;editorScope=null;editing=null;persistDraft();}});
 $('undo').addEventListener('click',()=>{if(previous)void commit(clone(previous),'已復原上一步');});
-$('retry').addEventListener('click',()=>{if(conflict){showConflicts();return;}if(authExpired){persistDraft();signIn();return;}void loadMapsConfig();pending&&ready&&access.canEdit?void commit(null,null,null,null,true):void boot();});
+$('retry').addEventListener('click',()=>{if(conflict){showConflicts();return;}if(authExpired){persistDraft();signIn();return;}void loadMapsConfig();if(pending&&ready&&access.canEdit){void commit(null,null,null,null,true);return;}if(tagDraft){const field=[...document.querySelectorAll('[data-card-tag]')].find(item=>item.dataset.tagId===tagDraft.id);if(field)void saveCardTag(field);return;}void boot();});
 $('print').addEventListener('click',()=>window.print());
 $('trip-rename-open').addEventListener('click',async()=>{if(!canChange()||!canSwitchTrip())return;showPage('trips');await tripManager.enter();tripManager.openRename(tripId);});
 $('editor-start-edit').addEventListener('click',()=>{if(!canChange())return;if(transportDirty){notice('請先儲存或取消卡片之間的交通時間。');return;}editorReadOnly=false;$('editor-title').textContent='編輯行程';lock();$('field-name').focus();});
 $('editor-delete').addEventListener('click',()=>{if(canChange()&&editing)void remove(editing.day,editing.index);});
 window.addEventListener('popstate',()=>{
+ if(tagDraft){persistDraft();history.replaceState(null,'',routeUrl(currentPage,activeDay,activeStop,appBase,tripId));notice('標籤尚未儲存，請先重試儲存。');return;}
  if(dayNameDraft){persistDraft();history.replaceState(null,'',routeUrl(currentPage,activeDay,activeStop,appBase,tripId));notice('名稱編輯尚未完成，請離開欄位自動儲存，或按 Esc 取消。');return;}
  if(busy||pending||conflict||dragging){history.replaceState(null,'',routeUrl(currentPage,activeDay,activeStop,appBase,tripId));notice('請先完成目前的儲存或衝突處理。');return;}
  if(draftStore&&!persistDraft()){history.replaceState(null,'',routeUrl(currentPage,activeDay,activeStop,appBase,tripId));return;}
@@ -692,7 +737,7 @@ window.addEventListener('popstate',()=>{
  for(const id of ['editor','transport-dialog','import-dialog'])if($(id).open)$(id).close();
  const route=readRoute(location.href);currentPage=route.page;setDay(route.day,route.stop);showPage(route.page,{record:false});if(route.page==='trips')void tripManager.enter();
 });
-window.addEventListener('beforeunload',e=>{if(tripManager.dirty||((pending||editorDirty||transportDirty||stayDraft||dayNameDraft||importer.dirty)&&!persistDraft())){e.preventDefault();e.returnValue='';}});
+window.addEventListener('beforeunload',e=>{if(tripManager.dirty||((pending||editorDirty||transportDirty||stayDraft||dayNameDraft||tagDraft||importer.dirty)&&!persistDraft())){e.preventDefault();e.returnValue='';}});
 function renderTransport(forceReload=false){
  const leg=routeLeg(days[activeDay]?.stops||[],transportIndex,resolvedPlaces),frame=$('transport-map');
  $('transport-pair').textContent=leg?leg.fromName+' → '+leg.toName:'';
@@ -765,7 +810,26 @@ function verifyIdentity(){
   }
  })().finally(()=>{if(sessionCheck===request)sessionCheck=null;});return request.promise;
 }
-$('trip-sign-out').addEventListener('click',()=>{const email=access.email;sessionChannel?.postMessage({type:'logout',email});forgetAccount();});
+$('trip-sign-out').addEventListener('click',async event=>{
+ if(signingOut){event.preventDefault();return;}
+ if(!canSwitchTrip()||tripManager.dirty||tripManager.pending){event.preventDefault();notice('請先完成儲存或取消編輯，再登出。');return;}
+ const email=access.email,logout=new URL(access.logoutUrl||'',location.href);
+ const directGoogle=!demoMode&&logout.origin===location.origin&&logout.pathname===appBase+'/logout';
+ if(!directGoogle){sessionChannel?.postMessage({type:'logout',email});forgetAccount();return;}
+ event.preventDefault();
+ const epoch=identityEpoch;
+ signingOut=true;busy=true;autoSync.stop();lock();$('trip-sign-out').setAttribute('aria-busy','true');
+ try{
+  const response=await fetch(apiPath('/api/auth/logout'),{method:'POST',cache:'no-store',redirect:'error',headers:{'X-Trip-Client':'multi-2'},signal:AbortSignal.timeout(15000)});
+  if(response.status!==401&&response.status!==204)await readCloudJson(response);
+  if(epoch!==identityEpoch)return;
+  sessionChannel?.postMessage({type:'logout',email});forgetAccount();authExpired=true;
+  location.assign(appBase+'/login');
+ }catch(error){
+  if(epoch!==identityEpoch)return;
+  busy=false;lock();if(ready)autoSync.start();notice('登出未完成，請重試。'+(error.status&&error.message?' '+error.message:''));
+ }finally{signingOut=false;$('trip-sign-out').removeAttribute('aria-busy');}
+});
 if(sessionChannel)sessionChannel.addEventListener('message',event=>{if(event.data?.type==='logout'&&event.data.email===access.email){forgetAccount();authExpired=true;$('save-status').textContent='已在其他分頁登出，請重新登入';}});
 window.addEventListener('storage',event=>{if(event.key===null||travelCache?.ownsKey(event.key)&&event.newValue===null)void verifyIdentity();});
 for(const event of ['online','offline'])window.addEventListener(event,()=>{placeFrame.connectionChanged();transportFrame.connectionChanged();if(event==='online'&&!embedKey)void loadMapsConfig();});
@@ -784,6 +848,7 @@ $('transport-dialog').addEventListener('close',()=>{if(!$('transport-dialog').op
 let restoringDraft=false;
 function captureDraft(event){
  if(restoringDraft||busy||!ready||!access.canEdit)return;
+ if(event.target.matches('[data-card-tag]'))return;
  const nameForm=event.target.closest('[data-day-name-form]');if(nameForm){captureDayName(nameForm);return;}
  if(event.target.closest('#import-dialog'))return;
  if(event.target.closest('#editor')){if(editorReadOnly)return;editorDirty=true;}
@@ -793,13 +858,14 @@ function captureDraft(event){
  persistDraft();
 }
 document.addEventListener('input',captureDraft);document.addEventListener('change',captureDraft);
-$('draft-discard').addEventListener('click',()=>{recovery=null;stayDraft=null;dayNameDraft=null;transportDirty=false;transportScope=null;transportDraft=null;transportEditorId='';timelineEditorId='';draftStore?.clear();$('draft-recovery').hidden=true;setDay(activeDay,activeStop);lock();void autoSync.tick();notice('已捨棄這個裝置的未儲存草稿');});
+$('draft-discard').addEventListener('click',()=>{recovery=null;stayDraft=null;dayNameDraft=null;tagDraft=null;transportDirty=false;transportScope=null;transportDraft=null;transportEditorId='';timelineEditorId='';draftStore?.clear();$('draft-recovery').hidden=true;setDay(activeDay,activeStop);lock();void autoSync.tick();notice('已捨棄這個裝置的未儲存草稿');});
 $('draft-restore').addEventListener('click',()=>{
  if(!recovery||!access.canEdit||busy)return;
  const saved=recovery;restoringDraft=true;
  try{
   editorReadOnly=false;
   if(saved.dayName){dayNameDraft=saved.dayName;days=clone(dayNameDraft.scope.days);revision=dayNameDraft.scope.revision;days[dayNameDraft.day].title=dayNameDraft.value;refresh(dayNameDraft.day);showPage('overview');}
+  if(saved.tag){tagDraft=saved.tag;days=clone(tagDraft.scope.days);revision=tagDraft.scope.revision;const index=days[tagDraft.day]?.stops.findIndex(stop=>stop.id===tagDraft.id);if(index<0||index===undefined)throw Error('找不到標籤草稿中的行程。');refresh(tagDraft.day,index);}
   if(saved.stay){stayDraft=saved.stay;days=clone(stayDraft.scope.days);revision=stayDraft.scope.revision;refresh();}
   if(saved.editor){
    const draft=saved.editor;openEditor(draft.editing?.day??Number(draft.fields.day),draft.editing?.index??null,draft.scope);newStopId=draft.newStopId||crypto.randomUUID();
@@ -839,7 +905,7 @@ function flightCardSummary(stop){
  return `<div class="flight-ticket"><div class="flight-ticket-heading">✈ ${esc([f.airline,f.number].filter(Boolean).join(' · ')||'機票')}</div><div class="flight-ticket-route">${endpoint(f.departureDateTime,f.departureTimezone,f.departureAirport)}<div class="flight-ticket-duration"><span>${esc(duration)}</span><span class="flight-ticket-arrow" aria-hidden="true"></span></div>${endpoint(f.arrivalDateTime,f.arrivalTimezone,f.arrivalAirport)}</div></div>`;
 }
 function lockDayNames(){
- for(const form of document.querySelectorAll('[data-day-name-form]')){const blocked=!access.canEdit||!ready||busy||!!pending||conflict||!!recovery||transportDirty||editorDirty||!!stayDraft||importer.dirty||dayNameDraft&&Number(form.dataset.dayIndex)!==dayNameDraft.day;for(const field of form.querySelectorAll('input,button'))field.disabled=!!blocked;form.querySelector('[data-day-name-cancel]').hidden=!(dayNameDraft&&Number(form.dataset.dayIndex)===dayNameDraft.day);}
+ for(const form of document.querySelectorAll('[data-day-name-form]')){const blocked=!access.canEdit||!ready||busy||!!pending||conflict||!!recovery||!!tagDraft||transportDirty||editorDirty||!!stayDraft||importer.dirty||dayNameDraft&&Number(form.dataset.dayIndex)!==dayNameDraft.day;for(const field of form.querySelectorAll('input,button'))field.disabled=!!blocked;form.querySelector('[data-day-name-cancel]').hidden=!(dayNameDraft&&Number(form.dataset.dayIndex)===dayNameDraft.day);}
 }
 function captureDayName(form){const day=Number(form.dataset.dayIndex);if(dayNameDraft&&dayNameDraft.day!==day)return;form.elements.dayName.setCustomValidity('');dayNameDraft??={scope:scopeSnapshot(),day,value:''};dayNameDraft.value=form.elements.dayName.value;persistDraft();lock();}
 const cancelledDayNameForms=new WeakSet();

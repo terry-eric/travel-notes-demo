@@ -150,9 +150,10 @@ export async function handleTrips(request,env){
   const retry=await env.DB.prepare('SELECT * FROM itineraries WHERE id=?').bind(trip.id).first();
   if(retry)return retry.owner_email===email?(retry.deleted_at!==null?apiReply({error:'這個行程已刪除，請從已刪除行程中恢復。'},409):apiReply(await rowData(env.DB,retry,'owner'))):apiReply({error:'無法建立這個行程，請重試。'},409);
   const days=calendarDays(trip),now=new Date().toISOString();
-  // The subquery cap is in the insertion itself, so concurrent requests cannot bypass it.
-  const result=await env.DB.prepare('INSERT INTO itineraries (id,owner_email,title,start_date,end_date,timezone,payload,previous,revision,mutation_id,created_at,updated_at) SELECT ?,?,?,?,?,?,?,NULL,0,\'\',?,? WHERE (SELECT COUNT(*) FROM itineraries WHERE owner_email=? AND deleted_at IS NULL)<100 ON CONFLICT(id) DO NOTHING').bind(trip.id,email,trip.title,trip.startDate,trip.endDate,trip.timezone,JSON.stringify(days),now,now,email).run();
-  if(!result.meta.changes){const created=await env.DB.prepare('SELECT * FROM itineraries WHERE id=? AND owner_email=?').bind(trip.id,email).first();if(created)return created.deleted_at!==null?apiReply({error:'這個行程已刪除，請從已刪除行程中恢復。'},409):apiReply(await rowData(env.DB,created,'owner'));return apiReply({error:'無法建立行程，每個帳號最多可建立 100 個進行中的行程。'},400);}
+  // Count archived records too: soft-delete must not permit unlimited storage.
+  // Keep the cap in the insertion so concurrent requests cannot bypass it.
+  const result=await env.DB.prepare('INSERT INTO itineraries (id,owner_email,title,start_date,end_date,timezone,payload,previous,revision,mutation_id,created_at,updated_at) SELECT ?,?,?,?,?,?,?,NULL,0,\'\',?,? WHERE (SELECT COUNT(*) FROM itineraries WHERE owner_email=?)<100 ON CONFLICT(id) DO NOTHING').bind(trip.id,email,trip.title,trip.startDate,trip.endDate,trip.timezone,JSON.stringify(days),now,now,email).run();
+  if(!result.meta.changes){const created=await env.DB.prepare('SELECT * FROM itineraries WHERE id=? AND owner_email=?').bind(trip.id,email).first();if(created)return created.deleted_at!==null?apiReply({error:'這個行程已刪除，請從已刪除行程中恢復。'},409):apiReply(await rowData(env.DB,created,'owner'));return apiReply({error:'每個帳號最多可保留 100 個旅行，包含已刪除的旅行。你可以恢復已有的旅行繼續規劃。'},400);}
   return apiReply({trip,days,revision:0,previous:null},201);
  }catch(error){console.error('Trip catalogue unavailable',error.message);return unavailable();}
 }

@@ -9,6 +9,7 @@ node_modules/
 worker-configuration.d.ts
 dist/
 _site/
+_pages/
 work/
 wrangler.jsonc
 wrangler.json

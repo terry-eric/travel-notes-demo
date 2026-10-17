@@ -6,6 +6,7 @@
   "engines": { "node": ">=24.0.0" },
   "scripts": {
     "build": "node scripts/build.mjs",
+    "build:entry": "node scripts/build-entry.mjs",
     "build:demo": "node scripts/build-demo.mjs",
     "dev": "node scripts/dev.mjs",
     "dev:trip": "node scripts/dev-trip.mjs",

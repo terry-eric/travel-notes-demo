@@ -1,20 +1,24 @@
 # 旅手帖 Travel Notes
 
-以每日行程為中心的繁體中文旅行規劃工具：建立多個行程、安排景點與停留時間、調整順序、整理出發前筆記，並透過 Google Maps 查看地點與路線。雲端版支援 email 登入，以及每個行程各自的檢視者與編輯者權限。
+以每日行程為中心的繁體中文旅行規劃工具：建立多個行程、安排景點與停留時間、調整順序、整理出發前筆記，並透過 Google Maps 查看地點與路線。雲端版支援 Google 帳號登入，以及每個行程各自的檢視者與編輯者權限。
 
-[開啟公開示範](https://terry-eric.github.io/travel-notes-demo/) · [GitHub 原始碼](https://github.com/terry-eric/travel-notes-demo)
+[開啟旅手帖](https://demo.terry878.org/trip) · [GitHub 原始碼](https://github.com/terry-eric/travel-notes-demo) · [GitHub Pages 入口](https://terry-eric.github.io/travel-notes-demo/)
 
-公開示範採用示範資料，修改保存在目前瀏覽器。要跨裝置同步、登入或與朋友共同編輯，請依下方步驟部署 Cloudflare Workers、D1 和 Access。這個儲存庫提供部署範本；GitHub Pages 不會建立雲端資料庫。
+正式入口為 **https://demo.terry878.org/trip**。本版已準備直接 Google 登入：完成 Google OAuth 設定、資料表遷移、限速綁定及部署後，每個人可用自己的 Google 帳號登入，以該帳號已驗證的 email 管理旅行；只有擁有者與該行程受邀的成員可以取得內容。資料儲存在雲端並支援跨裝置同步。GitHub Pages 會轉到同一個正式入口，不載入示範旅行或另一份資料庫。
+
+公開的是網站入口與原始碼；旅行內容不會因為網站開放而變成公開資料。請將正式服務網址交給要使用的人，登入後從「我的旅行」開始。
+
+直接 Google 登入模式不依賴 Cloudflare Access，也不占用 Access 的使用者席次；切換完成前，既有部署仍可能顯示原本的 Access 登入頁。Cloudflare Workers 與 D1 的運算、請求和儲存額度仍由所有使用者共用；相關限制見下方部署說明。
 
 ## 三種執行方式
 
 | 方式 | 資料儲存 | 身分與分享 | 適合用途 |
 | --- | --- | --- | --- |
-| GitHub Pages／`dev:demo` | 目前瀏覽器的 localStorage | 示範帳號與權限；沒有真正的登入、邀請信或多人同步 | 試用介面、公開展示 |
-| `npm run dev` | 本機 `.local/preview.sqlite` | 預覽程式代入測試 email，沒有 Access 登入 | 開發 API 與資料操作 |
-| Cloudflare Workers | Cloudflare D1 | Access email OTP 登入；伺服器檢查每個行程的權限 | 私人使用、跨裝置、多人協作 |
+| 正式服務／Cloudflare Workers | Cloudflare D1 | Google 帳號登入；伺服器檢查每個行程的權限 | 每人私人旅行、跨裝置、多人協作 |
+| `npm run dev` | 本機 `.local/preview.sqlite` | 預覽程式代入測試 email，沒有真正的登入 | 開發 API 與資料操作 |
+| `npm run dev:demo`（選配開發預覽） | 目前瀏覽器的 localStorage | 合成範例；沒有真正的登入、邀請信或多人同步 | 本機介面測試 |
 
-GitHub Pages 示範與雲端版資料彼此獨立。請勿把真實行程、私人 email 名單、D1 匯出、登入憑證或 API key 加入公開示範。示範中的更改只在同一個瀏覽器與網站來源保留；清除網站資料、使用無痕模式或按下示範重設後，資料可能消失。
+GitHub Pages 只提供轉址入口，沒有登入表單、行程資料或跨來源 API 呼叫。本機開發預覽與正式服務資料彼此獨立；請勿把真實行程、私人 email 名單、D1 匯出、登入憑證或 API key 提交到公開儲存庫。`dev:demo` 的修改只在同一瀏覽器與網站來源保留；清除網站資料或使用無痕模式可能讓開發預覽資料消失。
 
 ## 本機快速開始
 
@@ -26,10 +30,10 @@ cd travel-notes-demo
 npm ci
 npm run build
 npm test
-npm run dev:demo
+npm run dev
 ```
 
-開啟終端機印出的網址（示範伺服器標示為 `Demo:`）。`Ctrl+C` 停止伺服器。可指定示範網站的連接埠與子路徑：
+開啟終端機印出的 `Local:` 網址。`Ctrl+C` 停止伺服器。若只需要不啟動本機資料庫的合成介面預覽，可改用下列選配指令：
 
 ```powershell
 npm run dev:demo -- --port=4173 --base=/travel-notes-demo
@@ -38,7 +42,8 @@ npm run dev:demo -- --port=4173 --base=/travel-notes-demo
 | 指令 | 用途／輸出 |
 | --- | --- |
 | `npm run build` | 產生雲端 Worker 使用的 `dist/server/index.js`，不需 `.openai` 設定 |
-| `npm run build:demo` | 產生 GitHub Pages 的靜態 `_site/` |
+| `npm run build:entry` | 產生 GitHub Pages 的正式服務轉址入口 `_pages/` |
+| `npm run build:demo` | 產生選配本機示範的 `_site/`，不會由 Pages workflow 發布 |
 | `npm run dev:demo` | 建置並預覽瀏覽器本機示範 |
 | `npm run dev` | 在 loopback 啟動 Node／SQLite 開發預覽；開啟印出的 `/trips` 網址 |
 | `npm run dev:trip` | 同一個開發預覽，測試 `/trip` 子路徑 |
@@ -52,7 +57,7 @@ $env:TRIP_PREVIEW_EMAIL = 'friend@example.com'
 npm run dev
 ```
 
-`TRIP_PREVIEW_DB` 可指定另一個本機 SQLite 檔案；預設為 `.local/preview.sqlite`。這些開發身分不代表已驗證的雲端登入。請使用雲端版測試真正的 Access 登入流程。
+`TRIP_PREVIEW_DB` 可指定另一個本機 SQLite 檔案；預設為 `.local/preview.sqlite`。這些開發身分不代表已驗證的雲端登入。請使用自己部署的 HTTPS 網域測試真正的 Google 登入流程。
 
 ### 完整本機版：Node + SQLite
 
@@ -87,26 +92,28 @@ TRIP_PREVIEW_EMAIL=friend@example.com npm run dev
 node --env-file=.env scripts/dev.mjs
 ```
 
-macOS／Linux 同樣可執行這條 Node 指令。`.dev.vars` 是 Wrangler 本機開發用的設定，不能取代此處 Node 程式的環境變數。公開靜態示範不會讀取以上任何 key。
+macOS／Linux 同樣可執行這條 Node 指令。`.dev.vars` 是 Wrangler 本機開發用的設定，不能取代此處 Node 程式的環境變數。Pages 入口與選配 `dev:demo` 不會讀取以上任何 key。
 
-## GitHub Pages 公開示範
+## GitHub Pages 正式服務入口
 
-儲存庫的 Pages workflow 只上傳 `npm run build:demo` 產生的 `_site/`，不會部署 Worker、D1、Access 設定或本機資料庫。
+儲存庫的 Pages workflow 只上傳 `npm run build:entry` 產生的 **`_pages/`**，內容僅有 `index.html`、`404.html` 與 `.nojekyll`。入口自動前往正式網域，也提供可手動點選的按鈕。舊的 `index.html?page=…` 示範網址同樣會進入正式入口；它的示範參數不會帶到雲端或匯入成私人資料。
 
-1. Fork 或建立自己的公開儲存庫，保留 `.github/workflows/pages.yml`。
+Pages 不會部署 Worker、D1、Access 設定或本機資料庫，也不會發布 `_site/` 的合成行程。GitHub Pages 和正式服務沒有各自一套使用者資料；登入與同步都在正式網域完成。
+
+1. Fork 或建立自己的公開儲存庫，保留 `.github/workflows/pages.yml`。部署自己的雲端服務後，在 `scripts/build-entry.mjs` 把固定的 `liveAppUrl` 改成自己的 HTTPS 入口。
 2. 在 **Settings → Pages → Build and deployment → Source** 選擇 **GitHub Actions**。
 3. 推送至預設的 `main` 分支，或從 Actions 頁面手動執行 Pages workflow。
 4. 等待建置與部署成功，開啟 workflow 的 `github-pages` 環境網址。
 
-![GitHub Pages 設定：Source 選擇 GitHub Actions](docs/screenshots/04-github-pages.png)
+[教學截圖：GitHub Pages 的 Source 選擇 GitHub Actions](docs/screenshots/04-github-pages.png)
 
-上圖為此儲存庫的 Pages 設定頁。Fork 後請在自己的儲存庫完成相同設定。
+此截圖為儲存庫的 Pages 設定頁；Fork 後請在自己的儲存庫完成相同設定。
 
-專案型 Pages 網址通常為 `https://<帳號>.github.io/<儲存庫>/`。示範的頁面切換使用 `index.html?page=…`，可在儲存庫子路徑重新整理或分享連結。雲端版仍使用 `/trip/trips`、`/trip/daily` 等路徑。
+專案型 Pages 網址通常為 `https://<帳號>.github.io/<儲存庫>/`。正式服務使用 `/trip/trips`、`/trip/daily` 等路徑；旅行連結應分享正式網域的網址。
 
 workflow 使用 `actions/configure-pages@v5`、`actions/upload-pages-artifact@v4` 與 `actions/deploy-pages@v4`，部署工作需要 `pages: write`、`id-token: write` 和 `github-pages` 環境。設定方式見 [GitHub Pages 自訂 workflow 官方文件](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages)。
 
-## Cloudflare 私人多人版
+## 在自己的 Cloudflare 架設服務
 
 以下以 **`https://trip.example.com/trip`** 為範例。請全部換成自己的主機、網域、帳號與 email；`example.com` 和範本識別碼無法直接部署成可用服務。
 
@@ -131,16 +138,26 @@ macOS／Linux 將複製設定檔那一行改為 `cp wrangler.example.jsonc wrang
 | `routes[0].zone_name` | `example.com` | 這個主機所在的 Cloudflare Zone |
 | `vars.APP_HOST` | `trip.example.com` | 小寫的完整 hostname；不含協定、連接埠或路徑 |
 | `vars.APP_BASE` | `/trip` | 子路徑；不加結尾 `/`，根目錄使用空字串 `""` |
-| `vars.ACCESS_ISSUER` | `https://your-team.cloudflareaccess.com` | Zero Trust team domain，含 `https://`，不加結尾 `/` |
-| `vars.ACCESS_AUD` | Access application 的 AUD | 必須使用同一個 Access application 的 Application Audience |
+| `vars.AUTH_MODE` | `google` | 正式服務使用直接 Google 登入；不設定此值會保留舊版 Access 驗證 |
+| `vars.GOOGLE_CLIENT_ID` | 自己的 `…apps.googleusercontent.com` | Google Auth Platform 的 Web application client ID；不是 Maps API key |
 | `vars.OWNER_EMAIL` | `owner@example.com` | 公開範例行程的初始擁有者；一般使用者仍可建立自己的行程 |
 | `d1_databases[0].database_id` | 建立 D1 後取得的 UUID | 勿使用範本中的佔位文字 |
 
-`APP_BASE` 可為 `/private/travel` 等由英數、底線、連字號組成的路徑。若改用根目錄，請同時改 Route 為 `trip.example.com/*`，並讓 Access 保護整個主機。若改用 `/travel`，Route、Access public hostname 的路徑及 `APP_BASE` 要一起修改。
+直接 Google 模式必須保留範本的三個 `ratelimits` 綁定；缺少綁定時伺服器不會放行登入或私人 API：
+
+| Binding name | 範本 `namespace_id` | `simple.limit` / `period` | 計算對象 |
+| --- | --- | --- | --- |
+| `AUTH_LOGIN_LIMITER` | `531801` | 30 / 60 秒 | 公開登入請求依 IP 限速，先檢查再操作登入資料表 |
+| `AUTH_API_LIMITER` | `531802` | 120 / 60 秒 | 已登入 API 請求依 Google 的固定帳號識別碼限速 |
+| `AUTH_WRITE_LIMITER` | `531803` | 30 / 60 秒 | 已登入寫入請求依同一個固定帳號識別碼限速 |
+
+`namespace_id` 是由你選擇的正整數字串，應在自己的 Cloudflare 帳號中分開使用；若 `531801`–`531803` 已被其他 Worker 使用，換成三個未使用的值。同一 namespace 會共用計數器。Cloudflare 原生限速依服務請求的機房計算，計數器採非同步更新，**不是全球精確總額或防止帳單超額的硬上限**；仍需監看 Workers 與 D1 的整體用量。[Workers Rate Limiting 官方文件](https://developers.cloudflare.com/workers/runtime-apis/bindings/rate-limit/)
+
+`APP_BASE` 可為 `/private/travel` 等由英數、底線、連字號組成的路徑。若改用根目錄，請同時改 Route 為 `trip.example.com/*`；若改用 `/travel`，Route 和 `APP_BASE` 要一起修改。Google 的 Authorized JavaScript origins 設主機來源，不填子路徑。
 
 範本的 `/trip*` 會包含 `/trip`、`/trip?trip=…` 及其下的資源。Cloudflare Route 比對包含查詢字串，所以只設定精確 `/trip` 與 `/trip/*` 會漏掉帶查詢字串的父路徑。Worker 再以 `APP_HOST` 和 `/trip` 的路徑邊界檢查請求，對 `/tripper` 或其他主機回傳 404；缺少或格式錯誤的主機／子路徑設定回傳 503。[Workers Route 比對規則](https://developers.cloudflare.com/workers/configuration/routing/routes/)
 
-保持 `workers_dev: false` 與 `preview_urls: false`，避免新增未經同一套 Access 設定的公開入口。對應欄位見 [Wrangler 設定官方文件](https://developers.cloudflare.com/workers/wrangler/configuration/)。自己的 `wrangler.jsonc`、`.dev.vars`、`.env` 和本機資料庫不應提交到公開儲存庫。
+保持 `workers_dev: false` 與 `preview_urls: false`，避免增加設定之外的網站入口。Worker 只接受符合 `APP_HOST` 和 `APP_BASE` 的網址。對應欄位見 [Wrangler 設定官方文件](https://developers.cloudflare.com/workers/wrangler/configuration/)。自己的 `wrangler.jsonc`、`.dev.vars`、`.env` 和本機資料庫不應提交到公開儲存庫。
 
 ### 2. 建立 D1 與套用完整資料表遷移
 
@@ -157,7 +174,7 @@ npx wrangler d1 migrations apply travel-notes-db --remote --config wrangler.json
 
 `--remote` 會操作雲端 D1；`--local` 操作 Wrangler 自己的本機資料庫，和 `npm run dev` 的 `.local/preview.sqlite` 不同。請確認名稱與 config 指向預期資料庫。[D1 Wrangler 指令](https://developers.cloudflare.com/d1/wrangler-commands/)
 
-不要只建立最早的 `trips` 表。這個版本需要以下五個 SQL 檔案，Wrangler 會依序執行並記錄已套用的遷移：
+不要只建立最早的 `trips` 表。這個版本需要以下六個 SQL 檔案，Wrangler 會依序執行並記錄已套用的遷移：
 
 | 檔案 | 用途 |
 | --- | --- |
@@ -166,30 +183,41 @@ npx wrangler d1 migrations apply travel-notes-db --remote --config wrangler.json
 | `0002_multi_trip.sql` | 多行程、每個行程的成員、遷移標記與舊表保護 |
 | `0003_trip_archive.sql` | 刪除行程與恢復 |
 | `0004_stop_creators.sql` | 景點建立者的歷史紀錄 |
+| `0005_google_sessions.sql` | Google 固定帳號與 email 的唯一對應、一次性登入挑戰與可撤銷網站 session |
 
-SQL 本身不會帶入私人旅行資料。第一次通過驗證的 API 請求會把**虛構台灣範例**初始化給 `OWNER_EMAIL`；預設為 `owner@example.com`，Pages 的京都示範是另一組獨立資料。其他登入者的「我的旅行」可從空白開始。若要讓自己的帳號擁有範例，請在**第一次 API 使用之前**設定 `OWNER_EMAIL`。初始化後再改這個變數不會轉移既有行程的擁有者。
+SQL 本身不會帶入私人旅行資料。這個公開儲存庫的部署範本會在第一次通過驗證的 API 請求，把**虛構台灣範例**初始化給 `OWNER_EMAIL`；預設為 `owner@example.com`。其他登入者的「我的旅行」從空白開始，無法取得這份範例，除非受邀。若不需要範例，可讓 `OWNER_EMAIL` 保持為不使用的範例地址；若需要自己的帳號擁有範例，請在**第一次 API 使用之前**設定。初始化後再改這個變數不會轉移既有行程的擁有者。正式網域的既有資料與部署範本無關；Pages 入口不含任何種子行程。
 
 若從既有版本升級，先做下方的資料備份。`0002` 保留舊表作為恢復快照；首次 API 初始化後舊表被 trigger 鎖定。不要刪除遷移標記或解除保護來強迫重跑。[D1 migrations 官方說明](https://developers.cloudflare.com/d1/reference/migrations/)
 
-### 3. 建立 Access email OTP 登入
+### 3. 建立 Google 帳號登入
 
-先設定 Access 再發布 Worker，確保私人網址第一次開放時就需要登入。
+此模式不需要 Cloudflare Access application，也不需要 Google client secret 或 Maps API key。Google Identity Services 使用 Web application client ID；身份驗證用途只需要基本的 email／profile／openid，不要求 Gmail、Drive 等資料存取權限。[Google 登入設定](https://developers.google.com/identity/gsi/web/guides/get-google-api-clientid)
 
-1. 在 Cloudflare **Zero Trust → Integrations → Identity providers** 新增 **One-time PIN**。新的 Zero Trust 組織可能沒有自動啟用 OTP，需要手動新增。[One-time PIN 設定](https://developers.cloudflare.com/cloudflare-one/integrations/identity-providers/one-time-pin/)
-2. 在 **Zero Trust → Access controls → Applications** 新增 **Self-hosted** application。
-3. 在**同一個 application** 加入兩個 public hostname/path：`trip.example.com/trip` 和 `trip.example.com/trip/*`。父路徑與所有子路徑都必須受保護；`/trip/*` 單獨不涵蓋 `/trip`。[Access 路徑與 wildcard 規則](https://developers.cloudflare.com/cloudflare-one/access-controls/policies/app-paths/)
-4. 登入方式選擇 **One-time PIN**，application **Session Duration 設為 24 hours**。Allow policy 用 **Emails** 明確列出自己的 email 及需要使用網站的朋友；policy session 若另行設定，也設為 24 hours。請避免 Bypass／Everyone，並檢查是否有重疊的 Access application 改變這些路徑的政策。[Self-hosted application](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/self-hosted-public-app/)、[Session management](https://developers.cloudflare.com/cloudflare-one/access-controls/access-settings/session-management/)
-5. 從 application 的 **Additional settings** 複製 **Application Audience (AUD) Tag**，填入 `ACCESS_AUD`。將自己的 Zero Trust team domain 填入 `ACCESS_ISSUER`。
+1. 在 Google Cloud 選擇自己的專案，開啟 **Google Auth Platform → Branding**，設定應用程式名稱、支援 email、正式網站網址及隱私政策；Authorized domains 填自己的主網域，例如 `example.com`。本版提供 `/trip/privacy` 隱私說明頁；若改動 `APP_BASE`，使用對應的路徑。
+2. 在 **Audience** 設定可使用的帳號。若要對外開放，使用 External 並依 Google 介面完成發布；Testing 模式可能限制測試使用者。完成 Google 要求的驗證或品牌設定後再對外提供登入。
+3. 在 **Clients → Create client** 選擇 **Web application**。Authorized JavaScript origins 填 **`https://trip.example.com`**，不加 `/trip` 或其他路徑。這個版本使用 Google 彈出視窗的 JavaScript callback，無需另填登入 Redirect URI。
+4. 把產生的 client ID 放入 `wrangler.jsonc` 的 `vars.GOOGLE_CLIENT_ID`，並明確設定 `vars.AUTH_MODE` 為 `google`。Client ID 是公開設定；不應把 client secret 或其他憑證貼進前端。
+5. 套用上一步的 `0005_google_sessions.sql`，設定三個 `AUTH_*_LIMITER` 綁定，完成下方建置與部署。如果原本有 Cloudflare Access 保護同一個 `/trip` 網址，先保持原設定，等確認 Google 設定與 Worker 部署都正確後，再撤下該網址的 Access application 保護，避免使用者被導向舊的 email OTP 登入頁。
 
-登入時輸入 email，收取一次性驗證碼並填回 Access 登入頁。24 小時是網站 session 的設定，OTP 驗證碼另有較短的有效期。退出／切換帳號會前往 `/cdn-cgi/access/logout`。
+部署後開啟 `https://trip.example.com/trip/login`，使用官方 **使用 Google 帳號登入** 按鈕。伺服器檢查 Google ID token 的 RS256 簽章、issuer、client ID、有效時間、已驗證 email 及一次性 nonce；不能只傳 email 或自行編寫身分 header 代替登入。為確保 email 身分由 Google 掌握，此版本接受 Gmail 及 Google Workspace 的已驗證帳號；不接受只把第三方 email 綁到 Google 的帳號。
 
-Worker 使用 `Cf-Access-Jwt-Assertion`，從固定 `ACCESS_ISSUER` 的 `/cdn-cgi/access/certs` 取得簽章公鑰，檢查 RS256、issuer、AUD、到期時間、not-before 與 email。單純自行傳入 email 或身分 header 不能取代這個驗證。沒有有效 JWT 的 API 回傳 401；Access 設定不完整時回傳 503。[Cloudflare 要求 Worker 驗證 Access JWT](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/validating-json/)
+登入挑戰有效 10 分鐘且只能使用一次。登入成功後使用 24 小時網站 session；cookie 為 Secure、HttpOnly、SameSite=Lax，只套用在 `APP_BASE` 內。D1 保存 session 的雜湊與到期時間，不保存 Google 密碼；每個 Google 帳號最多保留 10 個網站 session。登出會撤銷目前網站 session，登入 Google 的其他網站不受影響。
 
-Access Allow policy 決定誰能登入整個網站；行程邀請決定登入後能讀寫哪些行程。兩者都需要設定。新增行程邀請不會寄出 email，也不會自動將對方加入 Cloudflare Access 的 Allow policy。
+行程權限仍以已驗證 email 判定。新帳號從自己的空白旅行清單開始，擁有者可邀請特定 email 作為 viewer 或 editor。邀請不會寄出 email，請另行交付正式網域的旅行連結。登入公開網站不會取得其他人的旅行。
+
+第一次成功登入會將 Google 的固定 `sub` 與已驗證 email 原子地綁定在 `auth_identities`；Google 帳號 ID 與 email 都有唯一約束。之後若同一個 Google 帳號更換 email，或另一個 Google 帳號取得原 email，系統會要求人工處理身分移轉，不會自動把原旅行交給新帳號。這也保護 Google Workspace email 被重新分配的情況。移轉前需核對身分與既有行程權限；不要刪除對應資料來跳過保護。
+
+#### 選配：保留舊版 Access 登入
+
+已有 Access 部署且尚未切換 Google 時，可以不設定 `AUTH_MODE=google`，繼續使用 `ACCESS_ISSUER` 與 `ACCESS_AUD` 驗證。`ACCESS_ISSUER` 必須是自己的 `https://your-team.cloudflareaccess.com`，`ACCESS_AUD` 是同一個 Access application 的 Application Audience。
+
+設定 One-time PIN 身分提供者與 Self-hosted application，在同一個 application 保護 `trip.example.com/trip` 和 `trip.example.com/trip/*`。Allow policy 可使用 **Include → Emails** 指定私人團體；若開放已驗證 email 則使用 **Include → Login Methods → One-time PIN**，不要使用 Bypass。Worker 仍驗證 `Cf-Access-Jwt-Assertion` 的簽章、issuer、AUD 與有效期。這是舊版選配模式，正式服務改用 Google 模式後不會信任 Access headers。[OTP 設定](https://developers.cloudflare.com/cloudflare-one/integrations/identity-providers/one-time-pin/)、[Access 規則](https://developers.cloudflare.com/cloudflare-one/access-controls/policies/)、[JWT 驗證](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/validating-json/)
+
+Access Free 上限為整個 Zero Trust 組織共用的 **50 個使用者席次**，不是同時在線人數。帳號驗證登入後占用席次，登出不會釋放；額滿時新使用者會被擋下。此限制只適用此處的 Access 模式，直接 Google 登入不占用 Access 席次。[Cloudflare 方案](https://www.cloudflare.com/plans/)、[席次管理](https://developers.cloudflare.com/cloudflare-one/team-and-resources/users/seat-management/)
 
 ### 4. 建置、檢查與部署
 
-確認 hostname、Route、D1 UUID、issuer、AUD 及 Access 政策都已完成後執行：
+確認 hostname、Route、D1 UUID、遷移、三個限速綁定、`AUTH_MODE=google` 與 Google client ID 都已完成後執行：
 
 ```powershell
 npm run build
@@ -198,9 +226,9 @@ npx wrangler deploy --dry-run --config wrangler.jsonc
 npm run deploy
 ```
 
-`--dry-run` 僅檢查／打包，不會上傳 Worker；它不能驗證 DNS、Access dashboard 設定或遠端 D1 遷移是否正確。`npm run deploy` 會實際上傳至登入的帳號。[Workers deploy 指令](https://developers.cloudflare.com/workers/wrangler/commands/workers/)
+`--dry-run` 僅檢查／打包，不會上傳 Worker；它不能驗證 DNS、Google client 的網站來源設定或遠端 D1 遷移是否正確。`npm run deploy` 會實際上傳至登入的帳號。[Workers deploy 指令](https://developers.cloudflare.com/workers/wrangler/commands/workers/)
 
-部署後開啟 `https://trip.example.com/trip`，先完成 Access 登入，再檢查「我的旅行」。使用另一個允許登入的帳號檢查：可建立自己的行程，未受邀的行程無法取得內容，viewer 只能看，editor 可以儲存修改，只有 owner 可以管理邀請與刪除／恢復。透過邀請名單撤銷成員後，該成員不應再讀取該行程。
+部署後開啟 `https://trip.example.com/trip`，先完成 Google 登入，再檢查「我的旅行」。使用另一個帳號檢查：可建立自己的行程，未受邀的行程無法取得內容，viewer 只能看，editor 可以儲存修改，只有 owner 可以管理邀請與刪除／恢復。撤銷邀請後，該成員不應再讀取該行程；登出後 API 不應再接受先前的 session。
 
 ## 建立行程與共同編輯
 
@@ -210,40 +238,39 @@ npm run deploy
 - **外側時間軸**：卡片外顯示開始、停留與離開時間，點一下時間即可修改。交通平常只顯示交通方式圖示和分鐘數；點開後可輸入 0–1440 分鐘，按「完成」收起。Google Maps 按鈕用來查路線，再自行填入確認過的分鐘數。下一站抵達時間依「本站開始＋停留＋通勤」重新計算；固定預約保留原時間，來不及時提醒，缺少停留或交通時間時停止計算。路線或交通方式改變後須重新確認分鐘數。
 - **編號地圖**：總覽顯示整趟旅行，每日行程也有當日路線圖；旅途地圖可切換當日／整趟旅行。不同日期使用不同顏色，依日期圖例辨識，點編號對應景點。連線表示當天行程順序，並非實際道路或自動導航，跨日期不硬接。地點需有座標，完整 Google Maps 地點網址的目的地座標可帶入，也可手動填「緯度, 經度」；僅有店名或短網址時不會猜測定位。地點更改後需重新定位。
 - **新增機票**：按「＋ 新增行程」，將「行程類型」改成「機票／航班」。填機場、各機場當地的出發／抵達日期、時間與 IANA 時區（例如 `Asia/Taipei`、`Asia/Tokyo`），可另填航空公司、航班號、航廈、訂位代號和備註。選擇對應的安排日期後儲存。每日時間列換算到旅行時區，機票保留兩地原始時間，飛行分鐘數依時差計算；出發時間固定，不會被一般交通順延。每個航段最多 24 小時，轉機請分段新增。
+- **卡片標籤**：直接點卡片上的標籤選擇分類，外框顏色會跟著更新並自動儲存，不必開啟編輯視窗。檢視者只能查看標籤，無法修改。
 
 地圖使用本地打包的 Leaflet 1.9.4 與 OpenStreetMap 圖磚，不需要 Google API key；Leaflet 授權見 `public/vendor/leaflet/LICENSE.txt`。圖磚只供目前畫面正常互動使用，保留可見署名及瀏覽器快取，不預抓／離線下載；公開圖磚沒有可用性保證。見 [OpenStreetMap 圖磚政策](https://operations.osmfoundation.org/policies/tiles/)。排列互動參考 [Funliday 官方行程教學](https://www.funliday.com/posts/funliday-app-ios-guidance-search/)，沒有複製其品牌或資料。
 
-![編號景點與整趟旅行連線地圖](docs/screenshots/05-route-map.png)
-![景點之間直接填交通分鐘數](docs/screenshots/06-inline-transport.png)
-![機票資料與各地日期時間](docs/screenshots/07-flight-fields.png)
+[本機教學截圖：編號地圖](docs/screenshots/05-route-map.png) · [交通分鐘數](docs/screenshots/06-inline-transport.png) · [機票資料](docs/screenshots/07-flight-fields.png)
 
 每個登入帳號都能從「我的旅行」建立自己的行程，設定名稱、起訖日期與時區。進入行程後，可編輯每日景點、停留時間、交通方式、地圖連結與筆記；編輯者的景點建立者紀錄由伺服器保存。
 
-### 圖解 1：從「我的旅行」開始
+### 教學 1：從「我的旅行」開始
 
-![我的旅行：建立新旅行與示範旅行清單](docs/screenshots/01-my-trips.png)
+[本機教學截圖：我的旅行與建立表單](docs/screenshots/01-my-trips.png)
 
 1. 開啟網站，選擇左側的 **我的旅行**。
 2. 按 **＋ 建立新旅行**，填寫 **旅行名稱**、**出發日期**、**結束日期** 與 **旅行目的地時區**。
 3. 按 **建立並開始規劃**。新旅行會按照選擇的日期建立空白每日行程。
 4. 在清單點選旅行即可繼續編輯；可從 **已刪除** 區域恢復自己先前刪除的旅行。
 
-本節畫面來自公開示範，示範帳號與示範行程可直接試用。相同的建立、編輯與匯入步驟適用於本機 SQLite 版和雲端版；真正的跨裝置資料與權限由自己部署的 Access／D1 版本提供。
+本節截圖使用本機合成資料，只作教學參考，並非正式服務的使用者資料或 GitHub Pages 展示行程。正式服務登入後只顯示自己的或受邀的旅行；本機 SQLite 版可用相同的建立、編輯與匯入步驟，但沒有真正的 email 登入或跨裝置同步。
 
-### 圖解 2：新增／編輯每日行程
+### 教學 2：新增／編輯每日行程
 
-![精簡編輯行程：名稱、安排日期與固定時間設定](docs/screenshots/02-edit-stop.png)
+[本機教學截圖：名稱、安排日期與固定時間](docs/screenshots/02-edit-stop.png)
 
 1. 進入一趟旅行，選擇 **每日行程** 與日期，按 **＋ 新增行程**。
 2. 編輯框填寫名稱、安排日期、地點與備註；時間、停留時間、順序、標籤與交通方式的重複欄位已先收起，保留既有設定。
 3. 展開 **地點與 Google Maps 分享連結**，填入具體店名／地址，或貼上 Google Maps 的分享連結。
 4. 有已確認的航班、預約或演出，勾選 **固定時間（保留原定時間）**，再按 **儲存行程**。
-5. 修改景點內容時先點開卡片，再按 **編輯**。時間和停留可直接點卡片外的時間軸；兩站之間的交通時間點開後填分鐘並按 **完成**。
+5. 修改景點內容時先點開卡片，再按 **編輯**。時間和停留可直接點卡片外的時間軸；兩站之間的交通時間點開後填分鐘並按 **完成**。分類標籤可直接在卡片上選擇，外框顏色同步改變。
 6. 總覽可把行程卡片拖到另一個日期；手機長按後拖動。也可在編輯框的 **安排日期** 選擇新日期。當日順序以拖曳調整；移動後需重新確認改變路段的交通分鐘數。機票的安排日期須與實際出發日期相符。
 
-### 圖解 3：匯入 GPT 規劃
+### 教學 3：匯入 GPT 規劃
 
-![匯入 GPT 行程：產生提示詞、貼上 JSON 與預覽](docs/screenshots/03-gpt-import.png)
+[本機教學截圖：匯入 GPT 行程](docs/screenshots/03-gpt-import.png)
 
 1. 開啟旅行中的 **匯入行程**，切換到 **匯入 GPT 行程**。
 2. 在提示詞中的 **我的需求** 填寫目的地、想去的地方與偏好，按 **複製提示詞**，貼到 ChatGPT 或其他 AI。
@@ -280,7 +307,7 @@ npm run deploy
 npx wrangler secret put GOOGLE_MAPS_EMBED_KEY --config wrangler.jsonc
 ```
 
-key 會出現在使用者瀏覽器的 iframe URL，因而可被看到；Cloudflare secret 僅避免把它直接放進儲存庫，網站與 API 限制仍需設定。公開 Pages 示範不需要這把 key，也不會從你的 Cloudflare 設定讀取它。
+key 會出現在使用者瀏覽器的 iframe URL，因而可被看到；Cloudflare secret 僅避免把它直接放進儲存庫，網站與 API 限制仍需設定。Pages 轉址入口與選配本機 `dev:demo` 不需要這把 key，也不會讀取你的 Cloudflare 設定。
 
 地圖 iframe 顯示的交通估計不會自動寫入行程時間表。本程式沒有付費 Routes／Directions API 的自動 ETA 計算；請自行確認交通時間並填寫。刪改前後景點或交通方式後，也應重新確認原本輸入的交通時間。
 
@@ -296,7 +323,7 @@ npx wrangler d1 export travel-notes-db --remote --output $tripBackupFile --confi
 npx wrangler d1 time-travel info travel-notes-db --config wrangler.jsonc
 ```
 
-保存匯出檔、Time Travel bookmark 與更新前的 Worker version ID。備份檔不應放進 `_site/` 或 GitHub Pages artifact。[D1 匯入／匯出說明](https://developers.cloudflare.com/d1/best-practices/import-export-data/)
+保存匯出檔、Time Travel bookmark 與更新前的 Worker version ID。備份檔不應放進 `_site/`、`_pages/` 或 GitHub Pages artifact。[D1 匯入／匯出說明](https://developers.cloudflare.com/d1/best-practices/import-export-data/)
 
 **只回退程式**時，先查看版本並選擇相容版本：
 
@@ -317,7 +344,7 @@ npx wrangler d1 time-travel restore travel-notes-db --bookmark YOUR_SAVED_BOOKMA
 
 ## 現有限制與容量
 
-程式目前每個帳號最多保留 **100 個未刪除行程**，每個行程 **1–60 天**，每天最多 **100 個項目**；邀請名單最多 **200 個 email 記錄**，包含撤銷後仍保留的記錄。行程寫入請求上限約 **1,000,000 bytes**。刪除是可恢復的封存，仍占資料庫空間；目前沒有 owner 轉移或一般使用者永久刪除功能。
+程式目前每個帳號最多建立 **100 個行程，包含已刪除但可恢復的行程**，每個行程 **1–60 天**，每天最多 **100 個項目**；邀請名單最多 **200 個 email 記錄**，包含撤銷後仍保留的記錄。行程寫入請求上限約 **1,000,000 bytes**。刪除是可恢復的封存，仍占資料庫空間；目前沒有 owner 轉移或一般使用者永久刪除功能。
 
 | D1 容量 | Workers Free | Workers Paid |
 | --- | --- | --- |
@@ -333,22 +360,28 @@ Free 還有每日讀寫及 Workers 請求額度；Paid 的儲存包含量與硬�
 
 ```text
 public/              共用前端、樣式與公開範例
-demo/                Pages 的本機 API 與示範入口
-server/              API、權限、Access JWT 與 Cloudflare entry point
-drizzle/             0000–0004 SQL 遷移
-scripts/             雲端／示範建置與本機預覽
+demo/                選配本機合成預覽的 API 與入口
+server/              API、行程權限、Google／舊版 Access 驗證與 Worker
+drizzle/             0000–0005 SQL 遷移
+scripts/             雲端／Pages 入口／本機預覽建置
 tests/               API、同步、介面與路由驗證
 wrangler.example.jsonc  不含真實識別碼的雲端設定範本
 dist/server/index.js 建置產物；供 Cloudflare entry point 匯入
-_site/               GitHub Pages 的唯一發布目錄
+_pages/              GitHub Pages 的唯一發布目錄；只含正式服務入口
+_site/               選配本機合成預覽產物；不發布至 Pages
 ```
 
-- **Pages 部署 404：** 確認 Source 是 GitHub Actions，Actions 的 Pages 工作成功，網址包含自己的儲存庫子路徑；不可把 `dist/` 當作 Pages 目錄。
+- **Pages 部署 404：** 確認 Source 是 GitHub Actions，Actions 的 Pages 工作成功，網址包含自己的儲存庫子路徑；必須發布 `_pages/`，不可把 `dist/` 或 `_site/` 當作目前的 Pages 目錄。
+- **Pages 還看到舊示範：** 等待最新的 Pages workflow 部署成功後重新整理；正式入口為 `https://demo.terry878.org/trip`。舊示範在瀏覽器中的修改不會自動轉到雲端。
 - **503「部署網址尚未設定」：** 檢查 `APP_HOST`、`APP_BASE` 的格式；hostname 要小寫、不能帶 `https://`，base 不能有結尾 `/`。
-- **503「正在設定私人登入」：** 檢查 `ACCESS_ISSUER` 是否為自己的 `https://…cloudflareaccess.com`、`ACCESS_AUD` 是否為空值；兩者都需要設定。佔位 AUD 也必須改成真實值，否則驗證不會成功。
-- **登入後 API 401：** 檢查同一個 Access application 是否同時保護父路徑與 wildcard，以及 issuer／AUD 是否對應該 application。重新登入並確認 token 未過期。
+- **Google 登入未啟用：** 確認 `AUTH_MODE=google`、`GOOGLE_CLIENT_ID` 是自己的 Web application ID、`0005_google_sessions.sql` 已套用，以及三個 `AUTH_*_LIMITER` 綁定都存在。不要把 Maps API key 當成登入 client ID。
+- **API 回傳 429：** 暫停密集重試並稍後重試；檢查該限速 binding 的 namespace 是否與別的應用程式共用。限速不是帳務硬上限。
+- **登入提示帳號 email 已變更或身分需移轉：** Google 固定帳號 ID 與原 email 的對應不一致，需由管理者核對後處理；不要改用 email header 或刪除 `auth_identities` 來繞過驗證。
+- **Google 顯示 origin 不允許：** Authorized JavaScript origins 要填正式網站來源，例如 `https://trip.example.com`，不含 `/trip`；也要檢查 OAuth Audience 是否允許該登入帳號。
+- **仍出現 Cloudflare email OTP：** 同一個網址仍受舊 Access application 保護；確認直接 Google 登入已設定、測試並部署後，撤下該網址的 Access 保護。
+- **登入後 API 401：** Google 模式請重新登入並確認 session 未過期、cookie 沒被瀏覽器攔截；第三方 email 綁定的 Google 帳號不在本版支援範圍。舊 Access 模式則檢查父路徑及 wildcard 是否受同一個 application 保護，以及 issuer／AUD 是否相符。
 - **某個行程 403：** 確認登入 email 與邀請名單相同、成員仍啟用，並開啟含正確 `trip` ID 的行程連結。
 - **API 503 或無法建立行程：** 檢查 `DB` binding 與 UUID、遠端 migrations 是否完整；勿把已部署 Worker 誤綁到空資料庫。
 - **地圖拒絕顯示：** 檢查 Google Cloud API 啟用、帳單、key 的 API／網站限制與瀏覽器錯誤訊息；不要把真實 key 放進 GitHub。
 
-部署指令與官方連結於 2026-10-04 查核；Cloudflare、Google 與 GitHub 的介面與方案可能更新。
+公開入口、Google 登入設定及舊版 Access 席次限制於 2026-10-18 查核；其餘部署指令與官方連結於 2026-10-04 查核。Cloudflare、Google 與 GitHub 的介面與方案可能更新。

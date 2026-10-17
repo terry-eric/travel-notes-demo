@@ -34,8 +34,8 @@ export async function ensureLegacy(db,owner=LEGACY_OWNER){
  if(await db.prepare("SELECT name FROM app_migrations WHERE name='legacy-members-v1'").bind().first())return;
  owner=cleanEmail(owner);const now=new Date().toISOString();
  const statements=[
-  db.prepare("INSERT OR IGNORE INTO itineraries (id,owner_email,title,start_date,end_date,timezone,payload,previous,revision,mutation_id,created_at,updated_at) SELECT ?,?,'台灣城市漫遊（虛構範例）','2026-11-11','2026-11-15','Asia/Tokyo',payload,previous,revision,mutation_id,updated_at,updated_at FROM trips WHERE lower(user_id)=? ORDER BY updated_at DESC LIMIT 1").bind(LEGACY_TRIP_ID,owner,owner),
-  db.prepare("INSERT OR IGNORE INTO itineraries (id,owner_email,title,start_date,end_date,timezone,payload,previous,revision,mutation_id,created_at,updated_at) VALUES (?,?,'台灣城市漫遊（虛構範例）','2026-11-11','2026-11-15','Asia/Taipei',?,NULL,0,'',?,?)").bind(LEGACY_TRIP_ID,owner,JSON.stringify(seedDays),now,now),
+  db.prepare("INSERT OR IGNORE INTO itineraries (id,owner_email,title,start_date,end_date,timezone,payload,previous,revision,mutation_id,created_at,updated_at) SELECT ?,?,'北海道旅遊 YOASOBI・milet','2026-11-11','2026-11-15','Asia/Tokyo',payload,previous,revision,mutation_id,updated_at,updated_at FROM trips WHERE lower(user_id)=? ORDER BY updated_at DESC LIMIT 1").bind(LEGACY_TRIP_ID,owner,owner),
+  db.prepare("INSERT OR IGNORE INTO itineraries (id,owner_email,title,start_date,end_date,timezone,payload,previous,revision,mutation_id,created_at,updated_at) VALUES (?,?,'北海道旅遊 YOASOBI・milet','2026-11-11','2026-11-15','Asia/Tokyo',?,NULL,0,'',?,?)").bind(LEGACY_TRIP_ID,owner,JSON.stringify(seedDays),now,now),
   db.prepare("INSERT OR IGNORE INTO itinerary_members (trip_id,email,role,enabled,updated_at) SELECT ?,lower(email),role,enabled,updated_at FROM trip_members WHERE role IN ('viewer','editor') AND NOT EXISTS (SELECT 1 FROM app_migrations WHERE name='legacy-members-v1')").bind(LEGACY_TRIP_ID),
   db.prepare("INSERT OR IGNORE INTO app_migrations (name) VALUES ('legacy-members-v1')").bind()
  ];
@@ -66,8 +66,9 @@ export async function sessionFor(request,env){
  if(request.method!=='GET')return apiReply({error:'不支援此操作。'},405);
  try{
   await ensureLegacy(env.DB,env.OWNER_EMAIL||LEGACY_OWNER);
-  if(!new URL(request.url).searchParams.has('trip'))return apiReply({email,role:'personal',canEdit:false,canShare:false,logoutUrl:'/cdn-cgi/access/logout',trip:null});
+  const logoutUrl=env.AUTH_MODE==='google'?(env.APP_BASE??'/trip')+'/logout':'/cdn-cgi/access/logout';
+  if(!new URL(request.url).searchParams.has('trip'))return apiReply({email,role:'personal',canEdit:false,canShare:false,logoutUrl,trip:null});
   const access=await tripAccess(env.DB,email,requestedTrip(request));
-  return access?apiReply(access.session):apiReply({error:'你沒有權限查看這個行程，或邀請已撤銷。'},403);
+  return access?apiReply({...access.session,logoutUrl}):apiReply({error:'你沒有權限查看這個行程，或邀請已撤銷。'},403);
  }catch{return apiReply({error:'暫時無法確認登入，請稍後重試。'},503);}
 }

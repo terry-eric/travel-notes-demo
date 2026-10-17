@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, primaryKey } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, primaryKey, index } from 'drizzle-orm/sqlite-core';
 export const trips = sqliteTable('trips', {
  userId: text('user_id').primaryKey(),
  payload: text('payload').notNull(),
@@ -44,3 +44,24 @@ export const stopCreators = sqliteTable('stop_creators', {
  stopId: text('stop_id').notNull(),
  createdBy: text('created_by')
 },table=>[primaryKey({columns:[table.tripId,table.stopId]})]);
+
+// Stable Google subject binding prevents reassigned email addresses taking over trips.
+export const authIdentities = sqliteTable('auth_identities', {
+ googleSub: text('google_sub').primaryKey(),
+ email: text('email').notNull().unique(),
+ createdAt: integer('created_at').notNull()
+});
+export const authLoginChallenges = sqliteTable('auth_login_challenges', {
+ tokenHash: text('token_hash').primaryKey(),
+ nonceHash: text('nonce_hash').notNull(),
+ returnTo: text('return_to').notNull(),
+ createdAt: integer('created_at').notNull(),
+ expiresAt: integer('expires_at').notNull()
+},table=>[index('auth_login_challenges_expiry').on(table.expiresAt)]);
+export const authSessions = sqliteTable('auth_sessions', {
+ tokenHash: text('token_hash').primaryKey(),
+ email: text('email').notNull(),
+ googleSub: text('google_sub').notNull(),
+ createdAt: integer('created_at').notNull(),
+ expiresAt: integer('expires_at').notNull()
+},table=>[index('auth_sessions_expiry').on(table.expiresAt),index('auth_sessions_subject_created').on(table.googleSub,table.createdAt)]);

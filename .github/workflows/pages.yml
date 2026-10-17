@@ -1,4 +1,4 @@
-name: Publish interactive demo to GitHub Pages
+name: Publish live service entry to GitHub Pages
 
 on:
   push:
@@ -27,11 +27,11 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm test
-      - run: npm run build:demo
+      - run: npm run build:entry
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v4
         with:
-          path: _site
+          path: _pages
   deploy:
     needs: build
     runs-on: ubuntu-latest
@@ -42,6 +42,6 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - name: Deploy demo
+      - name: Deploy live service entry
         id: deployment
         uses: actions/deploy-pages@v4

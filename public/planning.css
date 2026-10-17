@@ -4,6 +4,13 @@
 
 /* Times sit on the rail; the bordered card only contains the place or ticket. */
 #editor .editor-retained-fields{display:none!important}
+.card-tag-control{display:inline-flex;align-items:center;gap:6px;min-width:0;max-width:100%}
+select.card-tag-selector{appearance:none;max-width:100%;min-width:74px;min-height:36px;padding:6px 26px 6px 9px!important;border:1px solid var(--tag-color)!important;border-radius:6px;background-color:var(--tag-tint)!important;color:var(--ink)!important;font:inherit;font-size:12px!important;line-height:1.5;cursor:pointer;touch-action:manipulation;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='m3 4.5 3 3 3-3' fill='none' stroke='%23273d36' stroke-width='1.4' stroke-linecap='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 8px center}
+select.card-tag-selector:focus-visible{outline:2px solid var(--green);outline-offset:2px}select.card-tag-selector:disabled{opacity:.6;cursor:default}
+.card-tag-status{font-size:11px;line-height:1.5;color:var(--muted);overflow-wrap:anywhere}.card-tag-status:empty{display:none}
+.mini-stop .card-tag-control{justify-self:start;align-self:start;max-width:100%}
+@media(max-width:600px){select.card-tag-selector{font-size:16px!important;min-height:40px;padding-block:6px!important}.card-tag-control{gap:4px}}
+@media print{select.card-tag-selector{appearance:none!important;background-image:none;border:0!important;min-height:0;padding:0!important}.card-tag-status{display:none}}
 body:not(.read-only) #board .mini-stop[data-overview-stop-id]{cursor:grab}
 #board.is-overview-reordering .mini-stop{cursor:grabbing}
 #board .overview-drop-target{outline:2px solid var(--green);outline-offset:3px;background:var(--tint,#edf3e9)}

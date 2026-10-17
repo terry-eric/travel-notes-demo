@@ -3,7 +3,7 @@
   "name": "travel-notes",
   "main": "server/cloudflare.js",
   "compatibility_date": "2026-10-01",
-  // Serve only the configured Access-protected hostname, including preview URLs.
+  // Serve only the configured HTTPS hostname and validate the app session.
   "workers_dev": false,
   "preview_urls": false,
   // The trailing wildcard also matches /trip?query. The Worker separately
@@ -14,6 +14,9 @@
   "vars": {
     "APP_HOST": "trip.example.com",
     "APP_BASE": "/trip",
+    "AUTH_MODE": "google",
+    "GOOGLE_CLIENT_ID": "COPY_YOUR_GOOGLE_WEB_CLIENT_ID.apps.googleusercontent.com",
+    // Optional only for legacy Access mode; not used by Google mode.
     "ACCESS_ISSUER": "https://your-team.cloudflareaccess.com",
     "ACCESS_AUD": "COPY_YOUR_ACCESS_APPLICATION_AUD",
     // Public sample account; set your own login email before first API use.
@@ -26,6 +29,11 @@
       "database_id": "COPY_YOUR_D1_DATABASE_ID",
       "migrations_dir": "drizzle"
     }
+  ],
+  "ratelimits": [
+    {"name":"AUTH_LOGIN_LIMITER","namespace_id":"531801","simple":{"limit":30,"period":60}},
+    {"name":"AUTH_API_LIMITER","namespace_id":"531802","simple":{"limit":120,"period":60}},
+    {"name":"AUTH_WRITE_LIMITER","namespace_id":"531803","simple":{"limit":30,"period":60}}
   ],
   "build": { "command": "npm run build" }
 }
