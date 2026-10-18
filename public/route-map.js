@@ -26,7 +26,8 @@ export function mountRouteMap(container,options={}){
  const retryButton=el('button','route-map-retry','重新載入底圖');retryButton.type='button';retryButton.hidden=true;
  footer.append(status,retryButton);
  const legend=el('ul','route-map-legend');legend.setAttribute('aria-label','日期顏色圖例');
- const note=el('p','route-map-note','同色線是同一天景點間的行程連線；實際道路、交通時間請在 Google Maps 確認。');
+ const note=el('p','route-map-note','同色線是同一天景點間的行程連線；實際道路、交通時間請在 Google Maps 確認。公開地址定位資料：');
+ const source=el('a','','Photon / OpenStreetMap');source.href='https://photon.komoot.io/';source.target='_blank';source.rel='noopener noreferrer';note.append(source);
  shell.append(toolbar,canvas,footer,legend,note);container.replaceChildren(shell);
 
  function renderLegend(){
@@ -42,7 +43,11 @@ export function mountRouteMap(container,options={}){
  function report(){
   if(destroyed)return;
   const located=model.located.length,missing=model.missing.length;
-  const details=located?`已標示 ${located} 站${missing?` · ${missing} 站尚未定位`:''}`:model.entries.length?`${missing} 站尚未定位，貼上完整 Google Maps 地點連結或填寫座標即可定位。`:'新增行程後，景點會出現在這裡。';
+  const pending=model.missing.filter(entry=>entry.stop.geocodeState==='pending').length;
+  const confirming=model.missing.filter(entry=>entry.stop.geocodeState==='ambiguous').length;
+  const other=missing-pending-confirming;
+  const states=[pending?`正在定位 ${pending} 站…`:'',confirming?`${confirming} 站有多個地點，請確認`:'',other?`${other} 站尚未定位，請補上完整地址、地點連結或座標`:''].filter(Boolean);
+  const details=model.entries.length?[located?`已標示 ${located} 站`:'',...states].filter(Boolean).join(' · '):'新增行程後，景點會出現在這裡。';
   const problem=failedTiles.size?' · 部分底圖未能載入，行程標記仍可查看。':tilesLoading?' · 正在載入底圖…':'';
   status.textContent=details+problem;retryButton.hidden=!failedTiles.size;fitButton.disabled=!map||!located;
  }

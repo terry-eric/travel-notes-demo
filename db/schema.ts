@@ -65,3 +65,25 @@ export const authSessions = sqliteTable('auth_sessions', {
  createdAt: integer('created_at').notNull(),
  expiresAt: integer('expires_at').notNull()
 },table=>[index('auth_sessions_expiry').on(table.expiresAt),index('auth_sessions_subject_created').on(table.googleSub,table.createdAt)]);
+
+export const placeGeocodeCache = sqliteTable('place_geocode_cache', {
+ queryHash: text('query_hash').primaryKey().notNull(),
+ result: text('result').notNull(),
+ expiresAt: integer('expires_at').notNull(),
+ updatedAt: integer('updated_at').notNull()
+},table=>[index('place_geocode_cache_expiry').on(table.expiresAt)]);
+export const placeGeocodeRate = sqliteTable('place_geocode_rate', {
+ id: integer('id').primaryKey().notNull(),
+ day: integer('day').notNull(),
+ requests: integer('requests').notNull(),
+ nextRequestAt: integer('next_request_at').notNull()
+});
+export const deletedItineraries = sqliteTable('deleted_itineraries', {
+ id: text('id').primaryKey().notNull(),
+ ownerEmail: text('owner_email').notNull(),
+ revision: integer('revision').notNull()
+});
+export const deletedStops = sqliteTable('deleted_stops', {
+ tripId: text('trip_id').notNull().references(()=>itineraries.id),
+ stopId: text('stop_id').notNull()
+},table=>[primaryKey({columns:[table.tripId,table.stopId]})]);

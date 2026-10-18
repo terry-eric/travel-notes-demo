@@ -54,15 +54,15 @@ test('cached catalogue appears immediately but only a live catalogue enables des
  assert.match(h.$('trip-library').innerHTML,/旅行 trip-a/);
  assert.match(h.$('trips-status').textContent,/上次.*背景更新/);
  assert.equal(h.button('data-trip-delete').disabled,true);
- assert.equal(h.$('trip-deleted-library').children[0].disabled,true);
+ assert.equal(h.$('trip-deleted-library').children.length,0);assert.equal(h.$('trip-deleted').hidden,true);assert.deepEqual(h.cache.purged,['deleted']);assert.deepEqual(h.cache.saved.deletedTrips,[]);
  const first=h.manager.enter(),second=h.manager.enter();
  assert.equal(h.requests.length,1);assert.equal(h.manager.pending,false);assert.deepEqual(h.pendingChanges,[]);
  assert.equal(h.button('data-trip-id').disabled,false);assert.equal(h.$('trip-create-open').disabled,false);
  h.requests[0].resolve(catalogue([trip()],[trip('deleted')]));await Promise.all([first,second]);
- assert.equal(h.button('data-trip-delete').disabled,false);assert.equal(h.$('trip-deleted-library').children[0].disabled,false);
- assert.equal(h.$('trips-status').textContent,'');assert.equal(h.cache.writes.length,1);
+ assert.equal(h.button('data-trip-delete').disabled,false);assert.equal(h.$('trip-deleted-library').children.length,0);
+ assert.equal(h.$('trips-status').textContent,'');assert.equal(h.cache.writes.length,2);
  h.advance(59999);await h.manager.enter();assert.equal(h.requests.length,1);
- h.manager.setCache(h.cache);assert.equal(h.button('data-trip-delete').disabled,false);assert.equal(h.cache.writes.length,1);
+ h.manager.setCache(h.cache);assert.equal(h.button('data-trip-delete').disabled,false);assert.equal(h.cache.writes.length,2);
  const forced=h.manager.refresh({force:true});assert.equal(h.requests.length,2);h.requests[1].resolve(catalogue());await forced;
 });
 
@@ -86,7 +86,7 @@ test('background revisions preserve the explicit deletion review and submit the 
  h.advance(60001);const update=h.manager.enter();h.requests[1].resolve(catalogue([trip('trip-a',6)]));await update;
  assert.ok(h.button('data-delete-confirm'));
  await h.click('data-delete-confirm');assert.equal(h.requests[2].options.method,'DELETE');
- assert.deepEqual(JSON.parse(h.requests[2].options.body),{id:'trip-a',revision:5});
+ assert.deepEqual(JSON.parse(h.requests[2].options.body),{id:'trip-a',revision:5,permanent:true});
  const conflict=Error('conflict');conflict.status=409;h.requests[2].reject(conflict);await settle();
  assert.equal(h.cache.invalidated,1);assert.equal(h.requests.length,4);
  h.requests[3].resolve(catalogue([trip('trip-a',7)]));await settle();
@@ -99,19 +99,19 @@ test('a delayed pre-delete GET cannot resurrect a successfully deleted trip or i
  const h=harness(t);const first=h.manager.enter();h.requests[0].resolve(catalogue());await first;
  await h.click('data-trip-delete');h.advance(60001);const oldRead=h.manager.enter();
  await h.click('data-delete-confirm');assert.equal(h.requests[2].options.method,'DELETE');
- h.requests[2].resolve({ok:true,id:'trip-a',deleted:true});await settle();
+ h.requests[2].resolve({ok:true,id:'trip-a',deleted:true,permanent:true});await settle();
  assert.deepEqual(h.cache.purged,['trip-a']);assert.equal(h.requests.length,4);
  h.requests[3].resolve(catalogue([],[trip('trip-a',6)]));await settle();
  h.requests[1].resolve(catalogue([trip('trip-a',5)]));await oldRead;
  assert.equal(h.manager.pending,false);assert.equal(h.button('data-trip-id'),undefined);
- assert.deepEqual(h.cache.saved.trips,[]);assert.equal(h.cache.saved.deletedTrips[0].id,'trip-a');
+ assert.deepEqual(h.cache.saved.trips,[]);assert.deepEqual(h.cache.saved.deletedTrips,[]);assert.equal(h.$('trip-deleted').hidden,true);
 });
 
 test('failed persistence and post-delete refresh remove an older cached catalogue rather than resurrecting the deleted trip',async t=>{
  const h=harness(t);const first=h.manager.enter();h.requests[0].resolve(catalogue());await first;
  h.cache.writeCatalogue=()=>false;
  await h.click('data-trip-delete');await h.click('data-delete-confirm');
- h.requests[1].resolve({ok:true,id:'trip-a',deleted:true});await settle();
+ h.requests[1].resolve({ok:true,id:'trip-a',deleted:true,permanent:true});await settle();
  assert.equal(h.cache.saved,null);assert.deepEqual(h.cache.purged,['trip-a']);
  h.requests[2].reject(Error('offline'));await settle();
  assert.equal(h.manager.pending,false);assert.equal(h.button('data-trip-id'),undefined);assert.equal(h.cache.saved,null);

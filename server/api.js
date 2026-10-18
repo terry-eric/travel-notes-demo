@@ -78,28 +78,24 @@ async function rowData(db,row,role){
 }
 const unavailable=()=>apiReply({error:'暫時無法連上雲端，修改內容仍保留在畫面中，請稍後重試。'},503);
 const denied=()=>apiReply({error:'你沒有權限查看這個行程，或邀請已撤銷。'},403);
-async function changeTripArchive(request,env,email,body){
+async function permanentlyDeleteTrip(env,email,body){
  let id;try{
   id=text(body.id,80,true);if(!/^[a-zA-Z0-9_-]{1,80}$/.test(id))throw Error('行程識別碼不正確。');
   if(!Number.isSafeInteger(body.revision)||body.revision<0)throw Error('版本不正確。');
-  if(request.method==='PUT'&&body.action!=='restore')throw Error('不支援此操作。');
+  if(body.permanent!==true)throw Error('永久刪除無法復原，請重新整理網站並確認刪除。');
  }catch(error){return apiReply({error:error.message},400);}
- const row=await env.DB.prepare('SELECT id,owner_email,title,start_date,end_date,timezone,revision,deleted_at FROM itineraries WHERE id=? AND owner_email=?').bind(id,email).first();
- if(!row)return apiReply({error:'只有行程擁有者可以刪除或恢復這個行程。'},403);
- const deleting=request.method==='DELETE',done=deleted=>apiReply({ok:true,id,deleted});
- if(deleting&&row.deleted_at!==null)return done(true);
- if(!deleting&&row.deleted_at===null)return done(false);
+ const done=()=>apiReply({ok:true,id,deleted:true,permanent:true});
+ const tombstone=()=>env.DB.prepare('SELECT owner_email,revision FROM deleted_itineraries WHERE id=?').bind(id).first();
+ const prior=await tombstone();
+ if(prior)return prior.owner_email===email&&prior.revision===body.revision?done():apiReply({error:'只有旅行擁有者能確認這次永久刪除。'},403);
+ const row=await env.DB.prepare('SELECT id,revision FROM itineraries WHERE id=? AND owner_email=? AND deleted_at IS NULL').bind(id,email).first();
+ if(!row)return apiReply({error:'只有旅行擁有者可以永久刪除這個旅行。'},403);
  if(row.revision!==body.revision)return apiReply({error:'行程已在其他裝置更新，請更新行程列表後重試。'},409);
- if(!deleting){try{dateRange(row.start_date,row.end_date);cleanTimezone(row.timezone);}catch{return apiReply({error:'行程日期或時區資料不正確，無法恢復。'},400);}}
- const now=new Date().toISOString();
- const result=deleting?
-  await env.DB.prepare("UPDATE itineraries SET deleted_at=?,updated_at=?,revision=revision+1,mutation_id='' WHERE id=? AND owner_email=? AND revision=? AND deleted_at IS NULL").bind(now,now,id,email,body.revision).run():
-  await env.DB.prepare("UPDATE itineraries SET deleted_at=NULL,updated_at=?,revision=revision+1,mutation_id='' WHERE id=? AND owner_email=? AND revision=? AND deleted_at IS NOT NULL AND (SELECT COUNT(*) FROM itineraries WHERE owner_email=? AND deleted_at IS NULL)<100").bind(now,id,email,body.revision,email).run();
- if(result.meta.changes)return done(deleting);
- const latest=await env.DB.prepare('SELECT revision,deleted_at FROM itineraries WHERE id=? AND owner_email=?').bind(id,email).first();
- if(latest&&(deleting?latest.deleted_at!==null:latest.deleted_at===null))return done(deleting);
- if(!latest||latest.revision!==body.revision)return apiReply({error:'行程已在其他裝置更新，請更新行程列表後重試。'},409);
- return apiReply({error:'最多可保留 100 個進行中的行程，請先刪除其他行程再恢復。'},400);
+ const result=await env.DB.prepare('DELETE FROM itineraries WHERE id=? AND owner_email=? AND revision=? AND deleted_at IS NULL').bind(id,email,body.revision).run();
+ if(result.meta.changes)return done();
+ const latest=await tombstone();
+ if(latest?.owner_email===email&&latest.revision===body.revision)return done();
+ return apiReply({error:'行程已在其他裝置更新，請更新行程列表後重試。'},409);
 }
 async function renameTrip(env,email,body){
  let id,title,baseTitle;try{
@@ -135,27 +131,60 @@ export async function handleTrips(request,env){
   await ensureLegacy(env.DB,env.OWNER_EMAIL||LEGACY_OWNER);
   if(request.method==='GET'){
    const {results}=await env.DB.prepare("SELECT i.id,i.owner_email,i.title,i.start_date,i.end_date,i.timezone,i.revision,CASE WHEN i.owner_email=? THEN 'owner' ELSE m.role END AS access_role FROM itineraries i LEFT JOIN itinerary_members m ON m.trip_id=i.id AND m.email=? AND m.enabled=1 WHERE i.deleted_at IS NULL AND (i.owner_email=? OR m.role IN ('viewer','editor')) ORDER BY i.updated_at DESC,i.id").bind(email,email,email).all();
-   const archived=await env.DB.prepare('SELECT id,title,start_date,end_date,timezone,revision,deleted_at FROM itineraries WHERE owner_email=? AND deleted_at IS NOT NULL ORDER BY deleted_at DESC,id').bind(email).all();
-   return apiReply({email,trips:results.map(row=>({...tripMetadata(row),role:row.access_role,canEdit:['owner','editor'].includes(row.access_role),canShare:row.access_role==='owner',revision:row.revision})),deletedTrips:archived.results.map(row=>({...tripMetadata(row),role:'owner',canEdit:false,canShare:false,revision:row.revision,deletedAt:row.deleted_at}))});
+   return apiReply({email,trips:results.map(row=>({...tripMetadata(row),role:row.access_role,canEdit:['owner','editor'].includes(row.access_role),canShare:row.access_role==='owner',revision:row.revision})),deletedTrips:[]});
   }
   if(request.headers.get('X-Trip-Client')!==API_CLIENT)return apiReply({error:'網站已更新，請重新整理一次再儲存。'},428);
   const parsed=await mutationBody(request,4096);if(parsed.error)return parsed.error;const body=parsed.body;
   if(request.method==='PATCH')return await renameTrip(env,email,body);
-  if(request.method==='DELETE'||request.method==='PUT')return await changeTripArchive(request,env,email,body);
+  if(request.method==='DELETE')return await permanentlyDeleteTrip(env,email,body);
+  if(request.method==='PUT')return apiReply({error:'已刪除的旅行不提供恢復功能。'},405);
   let trip;try{
    const title=cleanTitle(body.title);dateRange(body.startDate,body.endDate);
    if(body.creationId!==undefined&&!(typeof body.creationId==='string'&&/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(body.creationId)))throw Error('建立行程識別碼不正確。');
    trip={id:body.creationId?.toLowerCase()||crypto.randomUUID(),title,startDate:body.startDate,endDate:body.endDate,timezone:cleanTimezone(body.timezone)};
   }catch(e){return apiReply({error:e.message},400);}
+  const deleted=()=>env.DB.prepare('SELECT id FROM deleted_itineraries WHERE id=?').bind(trip.id).first();
+  if(await deleted())return apiReply({error:'這個旅行已永久刪除，請建立新的旅行。'},409);
   const retry=await env.DB.prepare('SELECT * FROM itineraries WHERE id=?').bind(trip.id).first();
-  if(retry)return retry.owner_email===email?(retry.deleted_at!==null?apiReply({error:'這個行程已刪除，請從已刪除行程中恢復。'},409):apiReply(await rowData(env.DB,retry,'owner'))):apiReply({error:'無法建立這個行程，請重試。'},409);
+  if(retry)return retry.owner_email===email?(retry.deleted_at!==null?apiReply({error:'這個旅行已刪除，請建立新的旅行。'},409):apiReply(await rowData(env.DB,retry,'owner'))):apiReply({error:'無法建立這個行程，請重試。'},409);
   const days=calendarDays(trip),now=new Date().toISOString();
-  // Count archived records too: soft-delete must not permit unlimited storage.
-  // Keep the cap in the insertion so concurrent requests cannot bypass it.
-  const result=await env.DB.prepare('INSERT INTO itineraries (id,owner_email,title,start_date,end_date,timezone,payload,previous,revision,mutation_id,created_at,updated_at) SELECT ?,?,?,?,?,?,?,NULL,0,\'\',?,? WHERE (SELECT COUNT(*) FROM itineraries WHERE owner_email=?)<100 ON CONFLICT(id) DO NOTHING').bind(trip.id,email,trip.title,trip.startDate,trip.endDate,trip.timezone,JSON.stringify(days),now,now,email).run();
-  if(!result.meta.changes){const created=await env.DB.prepare('SELECT * FROM itineraries WHERE id=? AND owner_email=?').bind(trip.id,email).first();if(created)return created.deleted_at!==null?apiReply({error:'這個行程已刪除，請從已刪除行程中恢復。'},409):apiReply(await rowData(env.DB,created,'owner'));return apiReply({error:'每個帳號最多可保留 100 個旅行，包含已刪除的旅行。你可以恢復已有的旅行繼續規劃。'},400);}
+  // Old archived rows remain untouched and hidden. New deletions free a slot.
+  // Keep the active cap in the insertion so concurrent creates cannot bypass it.
+  const result=await env.DB.prepare('INSERT INTO itineraries (id,owner_email,title,start_date,end_date,timezone,payload,previous,revision,mutation_id,created_at,updated_at) SELECT ?,?,?,?,?,?,?,NULL,0,\'\',?,? WHERE (SELECT COUNT(*) FROM itineraries WHERE owner_email=? AND deleted_at IS NULL)<100 AND NOT EXISTS (SELECT 1 FROM deleted_itineraries WHERE id=?) ON CONFLICT(id) DO NOTHING').bind(trip.id,email,trip.title,trip.startDate,trip.endDate,trip.timezone,JSON.stringify(days),now,now,email,trip.id).run();
+  if(!result.meta.changes){if(await deleted())return apiReply({error:'這個旅行已永久刪除，請建立新的旅行。'},409);const created=await env.DB.prepare('SELECT * FROM itineraries WHERE id=? AND owner_email=?').bind(trip.id,email).first();if(created)return created.deleted_at!==null?apiReply({error:'這個旅行已刪除，請建立新的旅行。'},409):apiReply(await rowData(env.DB,created,'owner'));return apiReply({error:'每個帳號最多可保留 100 個旅行，請先刪除不再需要的旅行。'},400);}
   return apiReply({trip,days,revision:0,previous:null},201);
  }catch(error){console.error('Trip catalogue unavailable',error.message);return unavailable();}
+}
+async function permanentlyDeleteStop(env,email,id,access,body){
+ let stopId;
+ try{
+  stopId=text(body.deleteStopId,80,true);if(!/^[a-zA-Z0-9_-]{1,80}$/.test(stopId))throw Error('行程識別碼不正確。');
+  if(body.permanent!==true)throw Error('永久刪除無法復原，請確認刪除此行程。');
+  if(!Number.isSafeInteger(body.revision)||body.revision<0)throw Error('版本不正確。');text(body.mutationId,80,true);
+ }catch(error){return apiReply({error:error.message},400);}
+ const {row,role}=access;
+ // A lost reply can be retried after other edits without restoring the stop.
+ if(await env.DB.prepare('SELECT stop_id FROM deleted_stops WHERE trip_id=? AND stop_id=?').bind(id,stopId).first())return apiReply({...await rowData(env.DB,row,role),deletedStopId:stopId,permanent:true});
+ if(row.revision!==body.revision)return apiReply({error:'另一個分頁已更新行程。請載入最新版本後再刪除。'},409);
+ const original=withStopIds(JSON.parse(row.payload));
+ if(!original.some(day=>day.stops.some(stop=>stop.id===stopId)))return apiReply({error:'此行程已不在最新版本，請重新載入。'},409);
+ const remove=days=>days.map(day=>({...day,stops:day.stops.filter(stop=>stop.id!==stopId)}));
+ const payload=JSON.stringify(remove(original)),previous=row.previous?JSON.stringify(remove(withStopIds(JSON.parse(row.previous)))):null;
+ // D1 batch is atomic. Its first two statements use the same version and live editor
+ // permission, so failed CAS/revocation cannot leave a deletion tombstone.
+ const guard="id=? AND revision=? AND deleted_at IS NULL AND (owner_email=? OR EXISTS (SELECT 1 FROM itinerary_members WHERE trip_id=itineraries.id AND email=? AND role='editor' AND enabled=1))";
+ const results=await env.DB.batch([
+  env.DB.prepare('INSERT OR IGNORE INTO deleted_stops (trip_id,stop_id) SELECT id,? FROM itineraries WHERE '+guard).bind(stopId,id,body.revision,email,email),
+  env.DB.prepare('UPDATE itineraries SET payload=?,previous=?,revision=revision+1,mutation_id=?,updated_at=? WHERE '+guard).bind(payload,previous,body.mutationId,new Date().toISOString(),id,body.revision,email,email),
+  // changes() describes the immediately preceding UPDATE, not its attribution
+  // triggers. A failed CAS must not erase an existing stop's creator, even if
+  // a concurrent writer happens to reuse the same mutation identifier.
+  env.DB.prepare("DELETE FROM stop_creators WHERE trip_id=? AND stop_id=? AND changes()>0 AND EXISTS (SELECT 1 FROM itineraries WHERE id=? AND revision=? AND mutation_id=? AND deleted_at IS NULL AND (owner_email=? OR EXISTS (SELECT 1 FROM itinerary_members WHERE trip_id=itineraries.id AND email=? AND role='editor' AND enabled=1)))").bind(id,stopId,id,body.revision+1,body.mutationId,email,email)
+ ]);
+ const latest=await tripAccess(env.DB,email,id);if(!latest)return denied();
+ if(latest.role==='viewer')return apiReply({error:'你目前只能查看行程，無法刪除。'},403);
+ if(!results[1].meta.changes)return apiReply({error:'行程已在其他分頁變更，請重新載入。'},409);
+ return apiReply({...await rowData(env.DB,latest.row,latest.role),deletedStopId:stopId,permanent:true});
 }
 export async function handleApi(request,env){
  const email=authenticatedEmail(request);if(!email)return apiReply({error:'請重新登入網站後再試。'},401);
@@ -173,6 +202,7 @@ export async function handleApi(request,env){
   if(request.headers.get('X-Trip-Client')!==API_CLIENT)return apiReply({error:'網站已更新，請重新整理一次再儲存。'},428);
   const parsed=await mutationBody(request);if(parsed.error)return parsed.error;
   const body=parsed.body;let clean,title;
+  if(Object.hasOwn(body,'deleteStopId'))return await permanentlyDeleteStop(env,email,id,access,body);
   try{
    if(!Number.isSafeInteger(body.revision)||body.revision<0)throw Error('版本不正確。');text(body.mutationId,80,true);
    if(body.trip!==undefined&&(!body.trip||typeof body.trip!=='object'||Array.isArray(body.trip)))throw Error('行程資料格式不正確。');
@@ -182,6 +212,9 @@ export async function handleApi(request,env){
    clean=withStopIds(validateDays(body.days,tripMetadata(row)));
   }catch(e){return apiReply({error:e.message},400);}
   if(row.mutation_id===body.mutationId)return apiReply(await rowData(env.DB,row,role));
+  const stopIds=clean.flatMap(day=>day.stops.map(stop=>stop.id));
+  const removed=await env.DB.prepare('SELECT stop_id FROM deleted_stops WHERE trip_id=? AND stop_id IN (SELECT value FROM json_each(?))').bind(id,JSON.stringify(stopIds)).all();
+  if(removed.results.length)return apiReply({error:'部分行程已永久刪除，請重新載入最新內容，無法透過復原或舊草稿恢復。',code:'PERMANENT_STOP_DELETED',deletedStopIds:removed.results.map(record=>record.stop_id)},409);
   if(row.revision!==body.revision)return apiReply({error:'另一個分頁已更新行程。請載入最新版本後再儲存。'},409);
   // Storage failures stay in the outer 503 handler, separate from input errors.
   const ledger=await creatorLedger(env.DB,id,[clean]);clean=attributeStops(clean,row,email,ledger);

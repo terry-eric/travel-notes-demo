@@ -39,10 +39,10 @@ test('trip library groups by departure year and month in chronological order wit
  assert.deepEqual(groupTripsByMonth([]),[]);
 });
 
-test('deletion and restoration require an owner and the exact reviewed revision',()=>{
+test('permanent deletion requires an owner and the exact reviewed revision; recovery is unavailable',()=>{
  const trip={id:'legacy-hokkaido-2026',role:'owner',revision:24};
- assert.deepEqual(tripMutation(trip),{id:trip.id,revision:24});
- assert.deepEqual(tripMutation(trip,'restore'),{id:trip.id,revision:24,action:'restore'});
+ assert.deepEqual(tripMutation(trip),{id:trip.id,revision:24,permanent:true});
+ assert.throws(()=>tripMutation(trip,'restore'),/永久刪除無法復原/);
  for(const role of ['editor','viewer',undefined])assert.throws(()=>tripMutation({...trip,role}),/擁有者/);
  for(const revision of [undefined,-1,1.5,'24',Number.MAX_SAFE_INTEGER+1])assert.throws(()=>tripMutation({...trip,revision}),/版本不完整/);
  assert.throws(()=>tripMutation({...trip,id:'bad id'}),/版本不完整/);
@@ -56,6 +56,6 @@ test('authoritative selected-trip revisions refresh the card without downgrading
  assert.equal(updateCurrentTripRecord(record,{id:'travel-1',title:'沒有版本'}),record);
  const next=updateCurrentTripRecord(record,{id:'travel-1',title:'巴黎跨年',revision:9,role:'owner',canShare:true});
  assert.equal(next.title,'巴黎跨年');assert.equal(next.revision,9);assert.equal(next.role,'editor');assert.equal(next.canShare,false);
- assert.deepEqual(tripMutation({...next,role:'owner'}),{id:'travel-1',revision:9});
+ assert.deepEqual(tripMutation({...next,role:'owner'}),{id:'travel-1',revision:9,permanent:true});
  assert.equal(record.revision,8);
 });

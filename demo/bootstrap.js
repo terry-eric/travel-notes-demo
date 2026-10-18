@@ -23,13 +23,12 @@ const status=document.getElementById('demo-status');
 function message(value){status.textContent=value;status.hidden=!value;}
 try{api.load();if(api.recovered)message('先前示範資料格式不正確，已恢復合成示例。');}catch(error){message(error.message);}
 document.getElementById('demo-reset').addEventListener('click',()=>{
- if(!confirm('重設此示範的所有旅行、已刪除旅行及草稿，恢復京都三日示例？'))return;
+ if(!confirm('重設此示範的所有旅行、刪除標記及草稿，恢復京都三日示例？'))return;
  try{api.reset();location.assign(base+'/index.html?page=overview&trip='+DEMO_TRIP_ID);}catch(error){message(error.message);}
 });
 const accountLabel=document.querySelector('.trip-account small');if(accountLabel)accountLabel.textContent='儲存位置';
 document.querySelector('.trip-create-help').textContent='每趟旅行可安排 1–60 天。新旅行會有空白的每日行程，資料只存在此瀏覽器。';
 document.querySelector('#trip-library-empty p').textContent='建立旅行後，就能安排每日行程。示範模式不提供登入或同行者邀請。';
-document.querySelector('#trip-deleted > p').textContent='已刪除旅行仍保留在此瀏覽器，你可以恢復完整行程。';
 document.querySelector('.install-note').textContent='資料只存在此瀏覽器，不會同步到其他裝置。清除網站資料會刪除你的示範修改。';
 document.getElementById('sharing-open').textContent='邀請功能說明';
 

@@ -1,4 +1,3 @@
-import {demoMode} from './runtime.js';
 const DAY_MS=86400000;
 const datePattern=/^\d{4}-\d{2}-\d{2}$/;
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -40,10 +39,10 @@ export function tripRoleLabel(role){
 }
 
 export function tripMutation(trip,action='delete'){
- if(!trip||trip.role!=='owner')throw Error('只有旅行擁有者能刪除或恢復旅行。');
+ if(!trip||trip.role!=='owner')throw Error('只有旅行擁有者能永久刪除旅行。');
  if(typeof trip.id!=='string'||! /^[a-zA-Z0-9_-]{1,80}$/.test(trip.id)||!Number.isSafeInteger(trip.revision)||trip.revision<0)throw Error('旅行版本不完整，請重新載入清單後再試。');
- if(action!=='delete'&&action!=='restore')throw Error('旅行操作不正確。');
- return {id:trip.id,revision:trip.revision,...(action==='restore'?{action:'restore'}:{})};
+ if(action!=='delete')throw Error('旅行操作不正確，永久刪除無法復原。');
+ return {id:trip.id,revision:trip.revision,permanent:true};
 }
 
 export function updateCurrentTripRecord(record,metadata){
@@ -105,14 +104,14 @@ export function initTripManager({apiPath,readJson,onSelect,onDelete=()=>{},onRen
  const render=()=>{
   captureRename();
   const focused=document.activeElement,focusKey=focused?.dataset?.deleteConfirm?'data-delete-confirm':focused?.hasAttribute?.('data-delete-cancel')?'data-delete-cancel':null,renameFocus=focused?.hasAttribute?.('data-rename-input'),selection=renameFocus?[focused.selectionStart,focused.selectionEnd]:null;
-  const card=trip=>`<article class="trip-library-card${trip.id===currentId?' is-current':''}" data-trip-card="${esc(trip.id)}"><div class="trip-card-top"><span class="trip-role${trip.role==='owner'?' is-owner':''}">${tripRoleLabel(trip.role)}</span>${trip.id===currentId?'<span class="trip-current-badge">目前旅行</span>':''}</div><div class="trip-card-actions"><button type="button" class="trip-select" data-trip-id="${esc(trip.id)}" aria-label="開啟旅行：${esc(trip.title)}"${trip.id===currentId?' aria-current="true"':''}><strong>${esc(trip.title)}</strong><span class="trip-card-dates">${esc(tripDateLabel(trip))}</span></button>${['owner','editor'].includes(trip.role)?`<button type="button" class="trip-rename-icon" data-trip-rename="${esc(trip.id)}" aria-label="修改旅行名稱：${esc(trip.title)}" title="修改旅行名稱">${renameIcon}</button>`:''}${trip.role==='owner'?`<button type="button" class="trip-delete-icon" data-trip-delete="${esc(trip.id)}" aria-label="刪除旅行：${esc(trip.title)}" title="刪除旅行">${deleteIcon}</button>`:''}</div>${renameForm(trip)}${deleteReview===trip.id?`<div class="trip-delete-review"><p>將「${esc(trip.title)}」移到已刪除？你可以恢復，同行者暫時無法查看。</p><div><button type="button" class="plain" data-delete-cancel>取消</button><button type="button" class="plain danger" data-delete-confirm="${esc(trip.id)}">確認刪除</button></div></div>`:''}</article>`;
+  const card=trip=>`<article class="trip-library-card${trip.id===currentId?' is-current':''}" data-trip-card="${esc(trip.id)}"><div class="trip-card-top"><span class="trip-role${trip.role==='owner'?' is-owner':''}">${tripRoleLabel(trip.role)}</span>${trip.id===currentId?'<span class="trip-current-badge">目前旅行</span>':''}</div><div class="trip-card-actions"><button type="button" class="trip-select" data-trip-id="${esc(trip.id)}" aria-label="開啟旅行：${esc(trip.title)}"${trip.id===currentId?' aria-current="true"':''}><strong>${esc(trip.title)}</strong><span class="trip-card-dates">${esc(tripDateLabel(trip))}</span></button>${['owner','editor'].includes(trip.role)?`<button type="button" class="trip-rename-icon" data-trip-rename="${esc(trip.id)}" aria-label="修改旅行名稱：${esc(trip.title)}" title="修改旅行名稱">${renameIcon}</button>`:''}${trip.role==='owner'?`<button type="button" class="trip-delete-icon" data-trip-delete="${esc(trip.id)}" aria-label="永久刪除旅行：${esc(trip.title)}" title="永久刪除旅行">${deleteIcon}</button>`:''}</div>${renameForm(trip)}${deleteReview===trip.id?`<div class="trip-delete-review"><p>永久刪除「${esc(trip.title)}」？所有行程與同行者邀請都會刪除，無法復原。</p><div><button type="button" class="plain" data-delete-cancel>取消</button><button type="button" class="plain danger" data-delete-confirm="${esc(trip.id)}">確認永久刪除</button></div></div>`:''}</article>`;
   const displayed=renameDraft&&!trips.some(trip=>trip.id===renameDraft.id)?[...trips,renameDraft.trip]:trips;
   $('trip-library').innerHTML=groupTripsByMonth(displayed).map(group=>`<section class="trip-month-group"><h2>${esc(group.label)}<span>${group.trips.length} 趟旅行</span></h2><div class="trip-month-cards">${group.trips.map(card).join('')}</div></section>`).join('');
   $('trip-library-empty').hidden=trips.length>0||!!renameDraft||!ready;
   $('trip-list-count').textContent=ready?String(trips.length):'';
-  $('trip-deleted-count').textContent=String(deletedTrips.length);
-  $('trip-deleted-library').innerHTML=deletedTrips.map(trip=>`<article class="trip-deleted-card"><strong>${esc(trip.title)}</strong><small>${esc(tripDateLabel(trip))}</small><button type="button" class="secondary" data-trip-restore="${esc(trip.id)}" aria-label="恢復旅行：${esc(trip.title)}">恢復旅行</button></article>`).join('')||'<p class="trip-empty-deleted">目前沒有已刪除的旅行。</p>';
-  $('trip-deleted').hidden=!ready;
+  // Also clear an older cached page's former archive panel after an update.
+  if($('trip-deleted-library'))$('trip-deleted-library').innerHTML='';
+  if($('trip-deleted'))$('trip-deleted').hidden=true;
   lock();
   if(focusKey&&deleteReview)$('trip-library').querySelector(`[${focusKey}]`)?.focus();
   if(renameFocus&&renameDraft){const input=$('trip-library').querySelector('[data-rename-input]');input?.focus();if(Number.isInteger(selection[0])&&Number.isInteger(selection[1]))input?.setSelectionRange?.(...selection);}
@@ -154,10 +153,10 @@ export function initTripManager({apiPath,readJson,onSelect,onDelete=()=>{},onRen
     if(generation!==catalogueGeneration||epoch!==stateEpoch)return;
     if(!Array.isArray(data?.trips)||data.deletedTrips!==undefined&&!Array.isArray(data.deletedTrips)||typeof data.email!=='string'||!data.email.trim())throw Error('旅行清單回應不完整，請重新載入。');
     if(sessionEmail&&data.email.trim().toLowerCase()!==sessionEmail){const error=Error('登入帳號已變更，請重新登入。');error.status=401;throw error;}
-    trips=data.trips.map(record=>updateCurrentTripRecord(record,currentMetadata));deletedTrips=data.deletedTrips||[];ready=true;catalogueStale=false;catalogueAuthoritative=true;catalogueLoadedAt=now();
+    trips=data.trips.filter(record=>!record.deletedAt&&!record.deleted_at).map(record=>updateCurrentTripRecord(record,currentMetadata));deletedTrips=[];ready=true;catalogueStale=false;catalogueAuthoritative=true;catalogueLoadedAt=now();
     if(deleteReview&&!trips.some(trip=>trip.id===deleteReview)){deleteReview='';reviewedTrip=null;}
     if(renameDraft&&!trips.some(trip=>trip.id===renameDraft.id))renameDraft.error='這趟旅行已不在最新清單。請先複製名稱，再取消編輯。';
-    if(data.email)$('trip-account-email').textContent=demoMode?'此瀏覽器的示範資料':data.email;
+    if(data.email)$('trip-account-email').textContent=data.email;
     persistCatalogue();render();catalogueStatus('');return data;
    }catch(error){
     if(generation!==catalogueGeneration||epoch!==stateEpoch)return;
@@ -195,7 +194,7 @@ export function initTripManager({apiPath,readJson,onSelect,onDelete=()=>{},onRen
   const email=typeof session?.email==='string'?session.email.trim().toLowerCase():'';
   if(sessionEmail&&email!==sessionEmail)clear();
   sessionEmail=email;
-  $('trip-account-email').textContent=demoMode?'此瀏覽器的示範資料':session?.email||'尚未登入';
+  $('trip-account-email').textContent=session?.email||'尚未登入';
   $('trip-sign-out').hidden=!session?.logoutUrl;
   if(session?.logoutUrl)$('trip-sign-out').href=session.logoutUrl;
   lock();
@@ -205,8 +204,11 @@ export function initTripManager({apiPath,readJson,onSelect,onDelete=()=>{},onRen
   cache=adapter;cacheEmail=sessionEmail;
   if(!sessionEmail||!adapter)return;
   let saved;try{saved=adapter.readCatalogue();}catch{return;}
-  if(!Array.isArray(saved?.trips)||!Array.isArray(saved.deletedTrips))return;
-  trips=saved.trips;deletedTrips=saved.deletedTrips;ready=true;catalogueStale=true;catalogueAuthoritative=false;catalogueLoadedAt=null;
+  if(!Array.isArray(saved?.trips))return;
+  const oldDeleted=new Set((Array.isArray(saved.deletedTrips)?saved.deletedTrips:[]).map(trip=>trip.id));
+  for(const id of oldDeleted)try{cache?.deleteTrip?.(id);}catch{}
+  trips=saved.trips.filter(record=>!oldDeleted.has(record.id)&&!record.deletedAt&&!record.deleted_at);deletedTrips=[];ready=true;catalogueStale=true;catalogueAuthoritative=false;catalogueLoadedAt=null;
+  if(oldDeleted.size)persistCatalogue();
   render();catalogueStatus('已顯示上次的旅行清單，背景更新中');
  }
  function openRename(id){
@@ -295,18 +297,18 @@ export function initTripManager({apiPath,readJson,onSelect,onDelete=()=>{},onRen
   if(catalogueStale||!catalogueAuthoritative){status('請先重新載入旅行清單，確認最新內容後再操作。',true);return;}
   let body;try{body=tripMutation(trip,action);}catch(error){status(error.message,true);return;}
   const epoch=stateEpoch;invalidateFlight();
-  setPending(true);status(action==='delete'?'正在刪除旅行…':'正在恢復旅行…');
+  setPending(true);status('正在永久刪除旅行…');
   try{
-   const data=await request({method:action==='delete'?'DELETE':'PUT',headers:{'Content-Type':'application/json','X-Trip-Client':'multi-2'},body:JSON.stringify(body)});
+   const data=await request({method:'DELETE',headers:{'Content-Type':'application/json','X-Trip-Client':'multi-2'},body:JSON.stringify(body)});
    if(epoch!==stateEpoch)return;
-   if(data?.ok!==true||data.id!==trip.id)throw Error('操作回應不完整，請重新載入清單確認。');
+   if(data?.ok!==true||data.permanent!==true||data.id!==trip.id)throw Error('永久刪除回應不完整，請重新載入清單確認。');
    const wasCurrent=action==='delete'&&currentId===trip.id;
    deleteReview='';reviewedTrip=null;catalogueStale=true;catalogueLoadedAt=null;
    if(action==='delete')trips=trips.filter(item=>item.id!==trip.id);else deletedTrips=deletedTrips.filter(item=>item.id!==trip.id);
    if(action==='delete')try{cache?.deleteTrip(trip.id);}catch{}
    persistCatalogue();
    if(wasCurrent)setCurrent('');else render();
-   try{await refresh({force:true,internal:true});if(epoch!==stateEpoch)return;status(action==='delete'?'旅行已移到已刪除，可以隨時恢復。':'旅行已恢復，原本有效的同行者邀請也會恢復。');}
+   try{await refresh({force:true,internal:true});if(epoch!==stateEpoch)return;status('旅行已永久刪除，無法復原。');}
    catch(error){if(epoch!==stateEpoch)return;catalogueStale=true;status(`旅行已${action==='delete'?'刪除':'恢復'}，但清單更新失敗。請重新載入。`,true);}
    if(wasCurrent)await onDelete(trip.id);
   }catch(error){
@@ -352,10 +354,6 @@ export function initTripManager({apiPath,readJson,onSelect,onDelete=()=>{},onRen
  $('trip-library').addEventListener('submit',event=>{
   if(!event.target.hasAttribute?.('data-trip-rename-form'))return;
   event.preventDefault();void saveRename();
- });
- $('trip-deleted-library').addEventListener('click',event=>{
-  const button=event.target.closest('[data-trip-restore]');
-  if(button)void mutate(deletedTrips.find(trip=>trip.id===button.dataset.tripRestore),'restore');
  });
  $('trip-create-form').addEventListener('submit',async event=>{
   event.preventDefault();

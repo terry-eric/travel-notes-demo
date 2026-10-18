@@ -52,9 +52,10 @@ test('public registration keeps signed accounts private through the deployed Wor
    [shares(a.trip.id),'GET'],[shares(a.trip.id),'PUT',{email:bob,role:'editor',enabled:true}],
    [tripPath(a.trip.id),'PUT',{days:saved.days,revision:1,mutationId:'outsider-save'}],
    ['/api/trips','PATCH',{id:a.trip.id,title:'taken',baseTitle:marker,revision:1,mutationId:'outsider-title'}],
-   ['/api/trips','DELETE',{id:a.trip.id,revision:1}],['/api/trips','PUT',{id:a.trip.id,revision:1,action:'restore'}]
+   ['/api/trips','DELETE',{id:a.trip.id,revision:1,permanent:true}]
   ];
   for(const email of [bob,stranger])for(const [path,method,body] of cases)await privateDenial(await request(path,email,method,body),marker);
+  for(const email of [alice,bob,stranger]){const disabled=await request('/api/trips',email,'PUT',{id:a.trip.id,revision:1,action:'restore'});assert.equal(disabled.status,405);assert.ok(!(await disabled.text()).includes(marker));}
   const collision=await request('/api/trips',bob,'POST',{creationId:a.trip.id,title:marker,startDate:'2028-04-01',endDate:'2028-04-02'});
   assert.equal(collision.status,409);assert.ok(!(await collision.text()).includes(marker));
   assert.equal((await json(tripPath(a.trip.id),alice)).revision,1);

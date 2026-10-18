@@ -21,18 +21,40 @@ test('synthetic seed persists without backend and exposes a browser-only identit
  assert.equal((await api.fetch('/other/api/trip')).status,404);
 });
 
-test('create, rename, soft delete and restore survive a fresh API instance',async()=>{
+test('create, rename and confirmed permanent deletion survive reload without retaining contents or permitting restoration',async()=>{
  const storage=memoryStorage(),api=createDemoApi({storage,base:'/travel-demo'});
  const input={title:'新的示範旅行',startDate:'2028-02-28',endDate:'2028-03-01',timezone:'Asia/Taipei',creationId:'created-demo'};
  const created=await call(api,'trips','POST',input);assert.equal(created.status,201);assert.equal(created.data.days.length,3);assert.equal(created.data.days[1].isoDate,'2028-02-29');
  assert.equal((await call(api,'trips','POST',input)).data.revision,0);
  const renamed=await call(api,'trips','PATCH',{id:'created-demo',title:'改名後',baseTitle:input.title,revision:0,mutationId:'rename-demo'});assert.equal(renamed.data.trip.title,'改名後');assert.equal(renamed.data.revision,1);
  const conflicting=await call(api,'trips','PATCH',{id:'created-demo',title:'不同名稱',baseTitle:input.title,revision:0,mutationId:'rename-conflict'});assert.equal(conflicting.status,409);assert.equal(conflicting.data.trip.title,'改名後');
- assert.equal((await call(api,'trips','DELETE',{id:'created-demo',revision:1})).status,200);
- const list=await call(createDemoApi({storage,base:'/travel-demo'}),'trips');assert.equal(list.data.deletedTrips[0].title,'改名後');assert.ok(!list.data.trips.some(item=>item.id==='created-demo'));
+ assert.equal((await call(api,'trips','DELETE',{id:'created-demo',revision:1})).status,400);
+ assert.equal((await call(api,'trips','DELETE',{id:'created-demo',revision:0,permanent:true})).status,409);
+ const deleted=await call(api,'trips','DELETE',{id:'created-demo',revision:1,permanent:true});assert.equal(deleted.status,200);assert.equal(deleted.data.permanent,true);
+ const list=await call(createDemoApi({storage,base:'/travel-demo'}),'trips');assert.deepEqual(list.data.deletedTrips,[]);assert.ok(!list.data.trips.some(item=>item.id==='created-demo'));
  assert.equal((await call(api,'trip?trip=created-demo')).status,403);
- assert.equal((await call(api,'trips','PUT',{id:'created-demo',revision:2,action:'restore'})).status,200);
- assert.equal((await call(api,'trip?trip=created-demo')).data.trip.title,'改名後');
+ assert.equal((await call(api,'trips','PUT',{id:'created-demo',revision:2,action:'restore'})).status,405);
+ assert.equal((await call(api,'trips','POST',input)).status,409);
+ assert.equal((await call(api,'trips','DELETE',{id:'created-demo',revision:1,permanent:true})).status,200);
+ assert.deepEqual(api.load().deletedTrips,[{id:'created-demo',revision:1}]);
+ assert.ok(!storage.getItem(api.storageKey).includes('改名後'));
+});
+
+test('confirmed demo stop deletion clears current and undo, blocks stale resurrection, and preserves surviving stops',async()=>{
+ const storage=memoryStorage(),api=createDemoApi({storage,base:'/travel-demo'}),initial=(await call(api,trip())).data;
+ const days=structuredClone(initial.days),removed=days[0].stops[0].id,surviving=days[0].stops[1];
+ days[0].stops[0].desc='synthetic removed content';
+ const saved=(await call(api,trip(),'PUT',{days,revision:0,mutationId:'demo-save-before-delete'})).data;
+ assert.equal((await call(api,trip(),'PUT',{deleteStopId:removed,revision:1,mutationId:'no-consent'})).status,400);
+ const deletion={permanent:true,deleteStopId:removed,revision:1,mutationId:'demo-permanent-stop'};
+ const result=await call(api,trip(),'PUT',deletion);assert.equal(result.status,200);assert.equal(result.data.permanent,true);
+ assert.equal(result.data.deletedStopId,removed);assert.equal(result.data.revision,2);
+ for(const set of [result.data.days,result.data.previous])assert.ok(!set.some(day=>day.stops.some(stop=>stop.id===removed)));
+ assert.equal(result.data.days[0].stops[0].name,surviving.name);
+ assert.ok(!storage.getItem(api.storageKey).includes('synthetic removed content'));
+ const fresh=createDemoApi({storage,base:'/travel-demo'});assert.equal((await call(fresh,trip(),'PUT',deletion)).data.revision,2);
+ const stale=await call(fresh,trip(),'PUT',{days:saved.days,revision:2,mutationId:'restore-demo-stop'});assert.equal(stale.status,409);assert.deepEqual(stale.data.deletedStopIds,[removed]);
+ assert.deepEqual(fresh.load().trips[0].deletedStops,[removed]);
 });
 
 test('stop edits, ordering, manual minutes and fixed creator attribution persist with undo',async()=>{
@@ -69,11 +91,12 @@ test('schema strips unrelated fields and rejects malformed dates, duplicate ids 
 
 test('malformed/versioned storage recovers only demo scope; reset leaves unrelated apps intact',async()=>{
  const storage=memoryStorage(),api=createDemoApi({storage,base:'/travel-demo'});
- const unrelated=[demoStorageKey('/other-demo'),'production-setting','trip-cache-v1:%2Ftravel-demo:user%40example.com:trip:private','trip-draft-v2:/other-demo:demo-local@example.invalid:trip:tab'];
+ const unrelated=[demoStorageKey('/other-demo'),'production-setting','trip-cache-v1:%2Ftravel-demo:user%40example.com:trip:private','trip-geocode-v1:%2Ftravel-demo:user%40example.com:trip','trip-draft-v2:/other-demo:demo-local@example.invalid:trip:tab'];
  for(const key of unrelated)storage.setItem(key,'keep');
  storage.setItem(api.storageKey,JSON.stringify({version:999,trips:[]}));assert.equal(api.load().trips.length,1);assert.equal(api.recovered,true);
- storage.setItem('trip-cache-v1:%2Ftravel-demo:demo-local%40example.invalid:trip:demo','discard');storage.setItem('trip-draft-v2:/travel-demo:demo-local@example.invalid:demo:tab','discard');
+ storage.setItem('trip-cache-v1:%2Ftravel-demo:demo-local%40example.invalid:trip:demo','discard');storage.setItem('trip-geocode-v1:%2Ftravel-demo:demo-local%40example.invalid:trip','discard');storage.setItem('trip-draft-v2:/travel-demo:demo-local@example.invalid:demo:tab','discard');
  api.reset();assert.equal(api.recovered,false);assert.equal(storage.getItem('trip-cache-v1:%2Ftravel-demo:demo-local%40example.invalid:trip:demo'),null);assert.equal(storage.getItem('trip-draft-v2:/travel-demo:demo-local@example.invalid:demo:tab'),null);
+ assert.equal(storage.getItem('trip-geocode-v1:%2Ftravel-demo:demo-local%40example.invalid:trip'),null);
  for(const key of unrelated)assert.equal(storage.getItem(key),'keep');
  assert.equal(api.load().trips[0].trip.id,DEMO_TRIP_ID);
 });

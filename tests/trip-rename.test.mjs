@@ -33,9 +33,9 @@ test('active owners and invited editors can rename; viewers, revoked emails, str
   const shared=await rename(env,id,'共同編輯的名稱','原始旅程',0,'editor-rename',editor);assert.equal(shared.status,200);assert.equal((await shared.json()).role,'editor');
   await handleSharing(request('/api/shares?trip='+id,'PUT',{email:editor,role:'editor',enabled:false}),env);
   assert.equal((await rename(env,id,'編輯者已撤銷','共同編輯的名稱',1,'revoked-write',editor)).status,403);
-  assert.equal((await handleTrips(request('/api/trips','DELETE',{id,revision:1}),env)).status,200);
+  assert.equal((await handleTrips(request('/api/trips','DELETE',{id,revision:1,permanent:true}),env)).status,200);
   assert.equal((await rename(env,id,'刪除後的新名稱','共同編輯的名稱',2,'archived-write')).status,403);
-  assert.equal((await stored(DB,id)).title,'共同編輯的名稱');
+  assert.equal(await stored(DB,id),null);
  }finally{DB.close();}
 });
 

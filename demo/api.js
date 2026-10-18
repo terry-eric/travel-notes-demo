@@ -2,6 +2,7 @@ import {calendarDays,cleanDays,cleanState,metadata,text,safeId,DEMO_EMAIL,DAY_MS
 import {createDemoState,hydrateDemoCoordinates} from './seed.js';
 import {locationFromMapsUrl,parseMapsShare} from '../public/maps-link.js';
 import {clearStaleTravel} from '../public/transport.js';
+import {withoutDeletedStops} from '../public/drafts.js';
 
 const MAX_BYTES=3000000;
 export function demoStorageKey(base=''){
@@ -10,7 +11,7 @@ export function demoStorageKey(base=''){
 }
 export function demoOwnedStorageKey(key,base=''){
  base=base.replace(/\/+$/,'');const normalized=base||'/';
- return key===demoStorageKey(base)||typeof key==='string'&&(key.startsWith(`trip-cache-v1:${encodeURIComponent(normalized)}:${encodeURIComponent(DEMO_EMAIL)}:`)||key.startsWith(`trip-draft-v2:${base}:${DEMO_EMAIL}:`)||key.startsWith(`trip-draft-v1:${base}:${DEMO_EMAIL}:`));
+ return key===demoStorageKey(base)||typeof key==='string'&&(key.startsWith(`trip-cache-v1:${encodeURIComponent(normalized)}:${encodeURIComponent(DEMO_EMAIL)}:`)||key.startsWith(`trip-geocode-v1:${encodeURIComponent(normalized)}:${encodeURIComponent(DEMO_EMAIL)}:`)||key.startsWith(`trip-draft-v2:${base}:${DEMO_EMAIL}:`)||key.startsWith(`trip-draft-v1:${base}:${DEMO_EMAIL}:`));
 }
 function fault(message,status=400){const error=Error(message);error.status=status;return error;}
 const json=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'}});
@@ -62,15 +63,16 @@ export function createDemoApi({storage,base='',now=Date.now,uuid=()=>crypto.rand
     const entry=id?find(state,id):null;
     return json({email:DEMO_EMAIL,role:entry?'owner':null,canEdit:!!entry,canShare:false,...(entry?{trip:entry.trip}:{})});
    }
-   if(path==='/api/trips'&&method==='GET')return json({email:DEMO_EMAIL,trips:state.trips.filter(item=>!item.deletedAt).map(record),deletedTrips:state.trips.filter(item=>item.deletedAt).map(record)});
+   if(path==='/api/trips'&&method==='GET')return json({email:DEMO_EMAIL,trips:state.trips.filter(item=>!item.deletedAt).map(record),deletedTrips:[]});
    if(path==='/api/trip'&&method==='GET'){
     const entry=find(state,id);if(url.searchParams.get('revision')===String(entry.revision))return new Response(null,{status:204,headers:{'X-Trip-Role':'owner'}});
     return json(snapshot(entry));
    }
    if(path==='/api/trips'&&method==='POST'){
     const trip=metadata({id:body.creationId||uuid(),...body});
+    if(state.deletedTrips.some(marker=>marker.id===trip.id))return json({error:'這趟旅行已永久刪除，請建立新旅行。'},409);
     const existing=state.trips.find(item=>item.trip.id===trip.id);
-    if(existing)return existing.deletedAt?json({error:'這趟旅行已刪除，請從已刪除旅行恢復。'},409):json(snapshot(existing));
+    if(existing)return existing.deletedAt?json({error:'這趟旅行已刪除，請建立新旅行。'},409):json(snapshot(existing));
     if(state.trips.filter(item=>!item.deletedAt).length>=100||state.trips.length>=200)throw fault('示範最多可保留 100 趟旅行及 200 筆含已刪除的旅行。');
     const entry={trip,days:calendarDays(trip),previous:null,revision:0,deletedAt:null,mutationId:'',creators:{}};
     state.trips.push(entry);save(state);return json(snapshot(entry),201);
@@ -82,19 +84,33 @@ export function createDemoApi({storage,base='',now=Date.now,uuid=()=>crypto.rand
     if(entry.trip.title!==baseTitle||body.revision>entry.revision)return json({error:'另一個分頁已修改名稱，請選擇保留的版本。',trip:entry.trip,revision:entry.revision},409);
     entry.trip.title=title;entry.revision++;save(state);return json({ok:true,...snapshot(entry)});
    }
-   if(path==='/api/trips'&&['DELETE','PUT'].includes(method)){
-    const entry=find(state,body.id,true),deleting=method==='DELETE';
-    if(!deleting&&body.action!=='restore')throw fault('不支援此旅行操作。');
-    if(!!entry.deletedAt===deleting)return json({ok:true,id:entry.trip.id,deleted:deleting});
-    revision(entry,body);if(!deleting&&state.trips.filter(item=>!item.deletedAt).length>=100)throw fault('請先刪除其他旅行再恢復。');
-    entry.deletedAt=deleting?new Date(now()).toISOString():null;entry.revision++;save(state);return json({ok:true,id:entry.trip.id,deleted:deleting});
+   if(path==='/api/trips'&&method==='PUT')return json({error:'永久刪除的旅行不能恢復。'},405);
+   if(path==='/api/trips'&&method==='DELETE'){
+    if(body.permanent!==true||!safeId(body.id)||!Number.isSafeInteger(body.revision)||body.revision<0)throw fault('永久刪除無法復原，請明確確認刪除。');
+    const tombstone=state.deletedTrips.find(marker=>marker.id===body.id);
+    if(tombstone)return tombstone.revision===body.revision?json({ok:true,id:body.id,deleted:true,permanent:true}):json({error:'刪除版本不正確。'},409);
+    const entry=find(state,body.id);revision(entry,body);
+    state.trips=state.trips.filter(item=>item.trip.id!==entry.trip.id);state.deletedTrips.push({id:entry.trip.id,revision:entry.revision});save(state);
+    return json({ok:true,id:entry.trip.id,deleted:true,permanent:true});
    }
    if(path==='/api/trip'&&method==='PUT'){
     const entry=find(state,id);if(!safeId(body.mutationId))throw fault('修改識別碼不正確。');
+    if(Object.hasOwn(body,'deleteStopId')){
+     if(body.permanent!==true||!safeId(body.deleteStopId)||!Number.isSafeInteger(body.revision)||body.revision<0)throw fault('永久刪除無法復原，請確認刪除此行程。');
+     const stopId=body.deleteStopId;
+     if(entry.deletedStops.includes(stopId))return json({...snapshot(entry),deletedStopId:stopId,permanent:true});
+     revision(entry,body);if(!entry.days.some(day=>day.stops.some(stop=>stop.id===stopId)))throw fault('此行程已變更或不存在。',409);
+     entry.days=clearStaleTravel(withoutDeletedStops(entry.days,[stopId]));
+     if(entry.previous)entry.previous=clearStaleTravel(withoutDeletedStops(entry.previous,[stopId]));
+     entry.deletedStops.push(stopId);entry.revision++;entry.mutationId=body.mutationId;save(state);
+     return json({...snapshot(entry),deletedStopId:stopId,permanent:true});
+    }
     if(entry.mutationId===body.mutationId)return json(snapshot(entry));
     revision(entry,body);
     if(body.trip&&(body.trip.id!==id||body.trip.startDate!==entry.trip.startDate||body.trip.endDate!==entry.trip.endDate||body.trip.timezone!==entry.trip.timezone))throw fault('日期變動請使用「管理日期」。');
     const days=cleanDays(body.days,entry.trip);
+    const removed=days.flatMap(day=>day.stops.filter(stop=>entry.deletedStops.includes(stop.id)).map(stop=>stop.id));
+    if(removed.length)return json({error:'有行程已永久刪除，請重新載入後再編輯。',...snapshot(entry),deletedStopIds:removed},409);
     for(const day of days)for(const stop of day.stops){entry.creators[stop.id]??=DEMO_EMAIL;stop.createdBy=entry.creators[stop.id];}
     entry.previous=entry.days;entry.days=days;entry.revision++;entry.mutationId=body.mutationId;save(state);return json(snapshot(entry));
    }

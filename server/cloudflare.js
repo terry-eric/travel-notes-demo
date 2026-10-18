@@ -2,6 +2,7 @@ import site from '../dist/server/index.js';
 import {verifyAccess} from './cloudflare-auth.js';
 import {handleSharing} from './sharing.js';
 import {handleApi,handleTrips} from './api.js';
+import {handleGeocode} from './geocode.js';
 import {sessionFor} from './trips.js';
 import {accessPage} from './access-page.js';
 import {authConfigured,googleIdentity,loginChallenge,googleLogin,googleLogout,randomToken,safeReturnTo} from './google-auth.js';
@@ -67,7 +68,7 @@ export default {async fetch(request,env){
   try{
    const read=await env.AUTH_API_LIMITER.limit({key:identity.sub});
    if(read?.success!==true)return Response.json({error:'操作過於頻繁，請稍後再試。'},{status:429,headers:{...headers,'Retry-After':'60'}});
-   if(!['GET','HEAD'].includes(request.method)){
+   if(!['GET','HEAD'].includes(request.method)&&url.pathname!==base+'/api/geocode'){
     const write=await env.AUTH_WRITE_LIMITER.limit({key:identity.sub});
     if(write?.success!==true)return Response.json({error:'儲存次數過於頻繁，請稍後再試。'},{status:429,headers:{...headers,'Retry-After':'60'}});
    }
@@ -80,6 +81,7 @@ export default {async fetch(request,env){
  if(internal.pathname==='/api/shares')return handleSharing(forwarded,env);
  if(internal.pathname==='/api/trips')return handleTrips(forwarded,env);
  if(internal.pathname==='/api/trip')return handleApi(forwarded,env);
+ if(internal.pathname==='/api/geocode')return handleGeocode(forwarded,env);
  if(url.pathname===base||url.pathname===base+'/')return Response.redirect(url.origin+base+'/trips'+url.search,302);
  const response=await site.fetch(forwarded,env);
  if(response.headers.get('Content-Type')?.startsWith('text/html')&&request.method==='GET'){

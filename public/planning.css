@@ -12,6 +12,10 @@ select.card-tag-selector:focus-visible{outline:2px solid var(--green);outline-of
 @media(max-width:600px){select.card-tag-selector{font-size:16px!important;min-height:40px;padding-block:6px!important}.card-tag-control{gap:4px}}
 @media print{select.card-tag-selector{appearance:none!important;background-image:none;border:0!important;min-height:0;padding:0!important}.card-tag-status{display:none}}
 body:not(.read-only) #board .mini-stop[data-overview-stop-id]{cursor:grab}
+.overview-stop-row{min-width:0;position:relative;padding-left:10px;border-left:1px solid var(--line)}
+.overview-stop-time{display:block;margin:0 0 6px;font:500 11px/1.5 system-ui,sans-serif;color:var(--muted);overflow-wrap:anywhere}
+.overview-stop-time::before{content:'';position:absolute;left:-4px;margin-top:5px;width:7px;height:7px;border-radius:50%;background:var(--day)}
+.overview-stop-row .mini-stop{margin:0}
 #board.is-overview-reordering .mini-stop{cursor:grabbing}
 #board .overview-drop-target{outline:2px solid var(--green);outline-offset:3px;background:var(--tint,#edf3e9)}
 .mini-stop.reorder-source{opacity:.22}

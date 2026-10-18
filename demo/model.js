@@ -72,9 +72,14 @@ export function cleanDays(input,trip){
 export function cleanState(value){
  if(!object(value)||value.version!==DEMO_VERSION||!Array.isArray(value.trips)||value.trips.length>200)throw Error('示範資料版本或格式不正確。');
  const seen=new Set();
- return {version:DEMO_VERSION,trips:value.trips.map(entry=>{
+ const deletedTrips=Array.isArray(value.deletedTrips)?value.deletedTrips.map(entry=>{
+  if(!object(entry)||!safeId(entry.id)||!Number.isSafeInteger(entry.revision)||entry.revision<0)throw Error('永久刪除標記不正確。');
+  return {id:entry.id,revision:entry.revision};
+ }):[];
+ if(deletedTrips.length>20000||new Set(deletedTrips.map(entry=>entry.id)).size!==deletedTrips.length)throw Error('永久刪除標記過多或重複。');
+ return {version:DEMO_VERSION,deletedTrips,trips:value.trips.map(entry=>{
   if(!object(entry))throw Error('旅行資料不正確。');
-  const trip=metadata(entry.trip);if(seen.has(trip.id))throw Error('旅行識別碼重複。');seen.add(trip.id);
+  const trip=metadata(entry.trip);if(seen.has(trip.id)||deletedTrips.some(marker=>marker.id===trip.id))throw Error('旅行識別碼重複或已永久刪除。');seen.add(trip.id);
   if(!Number.isSafeInteger(entry.revision)||entry.revision<0)throw Error('旅行版本不正確。');
   const days=cleanDays(entry.days,trip),previous=entry.previous===null||entry.previous===undefined?null:cleanDays(entry.previous,trip);
   const creators=Object.create(null);
@@ -83,6 +88,9 @@ export function cleanState(value){
   if(Object.keys(creators).length>20000)throw Error('此示範旅行資料過多，請重設示範。');
   const deletedAt=entry.deletedAt??null;
   if(deletedAt!==null&&(typeof deletedAt!=='string'||deletedAt.length>40||!Number.isFinite(Date.parse(deletedAt))))throw Error('已刪除旅行格式不正確。');
-  return {trip,days,previous,revision:entry.revision,deletedAt,mutationId:safeId(entry.mutationId)?entry.mutationId:'',creators};
+  const deletedStops=Array.isArray(entry.deletedStops)?entry.deletedStops:[];
+  if(deletedStops.length>20000||deletedStops.some(id=>!safeId(id))||new Set(deletedStops).size!==deletedStops.length)throw Error('永久刪除行程標記不正確。');
+  for(const set of [days,previous])for(const day of set||[])for(const stop of day.stops)if(deletedStops.includes(stop.id))throw Error('永久刪除的行程不能復原。');
+  return {trip,days,previous,revision:entry.revision,deletedAt,mutationId:safeId(entry.mutationId)?entry.mutationId:'',creators,deletedStops:[...deletedStops]};
  })};
 }

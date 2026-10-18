@@ -72,6 +72,17 @@ test('tile failures expose a manual retry without hiding or deleting itinerary m
  tile.events.tileload({tile:{src:'failed-tile'}});tile.events.load();assert.equal(retry.hidden,true);assert.match(status.textContent,/已標示 1 站/);
 });
 
+test('location progress and ambiguous places are separate from tile failures and never create false pins',t=>{
+ const env=environment(t),stops=[{id:'a',name:'已定位',q:'25,121'},{id:'b',name:'查詢中',geocodeState:'pending'},{id:'c',name:'同名分店',geocodeState:'ambiguous'}];
+ const controller=mountRouteMap(env.container,{stops});env.cleanup(()=>controller.destroy());
+ const shell=env.container.children[0],status=shell.children[2].children[0];
+ assert.match(status.textContent,/已標示 1 站/);assert.match(status.textContent,/正在定位 1 站/);assert.match(status.textContent,/1 站有多個地點/);assert.equal(env.groups[0].items.length,1);
+ assert.equal(shell.children[4].children[0].href,'https://photon.komoot.io/');
+ env.tileLayers[0].events.tileerror({tile:{src:'slow'}});assert.match(status.textContent,/正在定位 1 站/);assert.match(status.textContent,/部分底圖/);
+ controller.update({stops:[stops[0],{...stops[1],coordinates:{lat:26,lng:122},geocodeState:'resolved'},stops[2]]});
+ assert.equal(env.groups[0].items.length,2);assert.doesNotMatch(status.textContent,/正在定位/);assert.match(status.textContent,/有多個地點/);
+});
+
 test('date legend, numbered pins, and separate lines all use the same safe day palette',t=>{
  const env=environment(t),stops=[
   {id:'a',name:'A',q:'25,121',dayIndex:0,date:'2027-01-01'},

@@ -59,7 +59,7 @@ test('legacy migration preserves data, revision, undo and membership exactly and
   await DB.prepare('INSERT INTO trips (user_id,payload,previous,revision,mutation_id,updated_at) VALUES (?,?,?,?,?,?)').bind(owner,JSON.stringify(days),JSON.stringify(seedDays),9,'old-mutation','old-time').run();
   await DB.prepare('INSERT INTO trip_members (email,role,enabled,updated_at) VALUES (?,?,?,?)').bind(bob,'editor',1,'old-time').run();
   await ensureLegacy(DB,owner);await ensureLegacy(DB,owner);
-  let data=await(await handleApi(request(),env)).json();assert.equal(data.trip.id,LEGACY_TRIP_ID);assert.equal(data.trip.timezone,'Asia/Tokyo');assert.equal(data.revision,9);assert.equal(data.days[0].stops[0].name,days[0].stops[0].name);assert.equal(data.previous[0].stops[0].name,seedDays[0].stops[0].name);
+  let data=await(await handleApi(request(),env)).json();assert.equal(data.trip.id,LEGACY_TRIP_ID);assert.equal(data.trip.timezone,'Asia/Taipei');assert.equal(data.revision,9);assert.equal(data.days[0].stops[0].name,days[0].stops[0].name);assert.equal(data.previous[0].stops[0].name,seedDays[0].stops[0].name);
   assert.equal((await handleApi(request('/api/trip','GET',undefined,bob),env)).status,200);
   await handleSharing(request('/api/shares','PUT',{email:bob,role:'editor',enabled:false}),env);await ensureLegacy(DB,owner);
   assert.equal((await handleApi(request('/api/trip','GET',undefined,bob),env)).status,403);
