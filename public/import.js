@@ -2,6 +2,12 @@ import {parseMapsShare,locationFromMapsUrl} from './maps-link.js';
 import {clockMinutes} from './transport.js';
 import {buildGptPrompt,parseGptImport} from './gpt-import.js';
 import {formatDuration} from './duration.js';
+import {reviewImport} from './import-review.js';
+
+export function refreshGptPrompt(previous,days,trip){
+ const fresh=buildGptPrompt(days,trip),needs=/我的需求：\n([\s\S]*?)\n\n可安排日期：/.exec(previous||'');
+ return needs?fresh.replace(/我的需求：\n[\s\S]*?\n\n可安排日期：/,()=>`我的需求：\n${needs[1]}\n\n可安排日期：`):fresh;
+}
 
 export function parseImportText(text){
  if(typeof text!=='string'||text.length>80000)throw Error('分享內容過長，請分批匯入。');
@@ -43,15 +49,28 @@ export function insertImported(days,rows){
 }
 
 const escape=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-export function initImport({canWrite,getScope,onSave,onChange,onClose}){
+export function initImport({canWrite,getScope,getFreshScope=async()=>getScope(),onSave,onChange,onClose}){
  const $=id=>document.getElementById(id);let scope=null,rows=[],dirty=false,working=false,kind='maps';
  const options=selected=>scope.days.map((day,i)=>`<option value="${i}" ${i===selected?'selected':''}>${escape(day.date)} ${escape(day.week)}</option>`).join('');
  function collect(){
   return rows.map((row,i)=>{const el=$('import-rows').querySelector(`[data-import-row="${i}"]`);const result={...row,name:el.querySelector('[name="importName"]').value.trim(),day:Number(el.querySelector('[name="importDay"]').value),time:el.querySelector('[name="importTime"]').value};if(kind==='gpt'){result.q=el.querySelector('[name="importPlace"]').value.trim();if(result.q!==row.q)result.mapUrl='https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(result.q);}return result;});
  }
+ function checkRows(){
+  const problems=kind==='gpt'?reviewImport(collect(),scope.days,scope.trip||{}):[];
+  $('import-rows').querySelectorAll('[data-import-row]').forEach((el,i)=>{const messages=problems.filter(problem=>problem.row===i).map(problem=>problem.message);el.querySelector('.import-review').textContent=[...new Set(messages)].join(' ');el.classList.toggle('import-row-conflict',messages.length>0);});
+  $('import-save').disabled=working||!canWrite()||problems.length>0;
+  if(!problems.length&&/^(請調整下方標示|目前行程已有更新，請調整)/.test($('import-error').textContent))$('import-error').textContent='';
+  return problems;
+ }
+ async function freshScope(){
+  const fresh=await getFreshScope();if(!scope||fresh.tripId!==scope.tripId)throw Error('旅行已切換，請重新開啟匯入。');
+  const current=rows.length?collect():[],dates=scope.days.map(day=>day.isoDate||day.date);
+  const mapped=current.map(row=>{const day=fresh.days.findIndex(item=>(item.isoDate||item.date)===dates[row.day]);if(day<0)throw Error('旅行日期已變更，請重新產生行程。');return {...row,day};});
+  scope=fresh;rows=mapped;return fresh;
+ }
  function render(){
-  $('import-rows').innerHTML=rows.map((row,i)=>`<article class="import-row" data-import-row="${i}"><label>行程名稱<input name="importName" aria-label="第 ${i+1} 筆行程名稱" value="${escape(row.name)}" required maxlength="120"></label><label>日期<select name="importDay" aria-label="第 ${i+1} 筆日期">${options(row.day)}</select></label><label>時間<input type="time" name="importTime" aria-label="第 ${i+1} 筆時間" value="${escape(row.time)}" required></label>${kind==='gpt'?`<label class="import-place">地點／地址<input name="importPlace" aria-label="第 ${i+1} 筆地點" value="${escape(row.q)}" required maxlength="300"></label><div class="import-meta"><span class="tag">${escape(row.tag)}</span><span>停留 ${formatDuration(row.duration)}</span><span>${({walking:'步行',transit:'大眾運輸',driving:'開車',bicycling:'自行車'})[row.mode]}</span>${row.live?'<span>固定時間</span>':''}${row.desc?`<p>${escape(row.desc)}</p>`:''}</div>`:''}<a class="stop-link" href="${escape(row.mapUrl)}" target="_blank" rel="noopener noreferrer">確認 Google Maps 地點 ↗</a><button type="button" class="plain danger" data-import-remove="${i}" aria-label="移除第 ${i+1} 筆">移除</button></article>`).join('');
-  $('import-save').hidden=!rows.length;$('import-count').textContent=rows.length?`${rows.length} 筆行程，每筆可分別設定日期和時間。匯入會加入現有行程。`:'';
+  $('import-rows').innerHTML=rows.map((row,i)=>`<article class="import-row" data-import-row="${i}"><label>行程名稱<input name="importName" aria-label="第 ${i+1} 筆行程名稱" value="${escape(row.name)}" required maxlength="120"></label><label>日期<select name="importDay" aria-label="第 ${i+1} 筆日期">${options(row.day)}</select></label><label>時間<input type="time" name="importTime" aria-label="第 ${i+1} 筆時間" value="${escape(row.time)}" required></label>${kind==='gpt'?`<label class="import-place">地點／地址<input name="importPlace" aria-label="第 ${i+1} 筆地點" value="${escape(row.q)}" required maxlength="300"></label><div class="import-meta"><span class="tag">${escape(row.tag)}</span><span>停留 ${formatDuration(row.duration)}</span><span>${({walking:'步行',transit:'大眾運輸',driving:'開車',bicycling:'自行車'})[row.mode]}</span>${row.live?'<span>固定時間</span>':''}${row.desc?`<p>${escape(row.desc)}</p>`:''}</div>`:''}<p class="import-review" role="status"></p><a class="stop-link" href="${escape(row.mapUrl)}" target="_blank" rel="noopener noreferrer">確認 Google Maps 地點 ↗</a><button type="button" class="plain danger" data-import-remove="${i}" aria-label="移除第 ${i+1} 筆">移除</button></article>`).join('');
+  $('import-save').hidden=!rows.length;$('import-count').textContent=rows.length?`${rows.length} 筆行程，每筆可分別設定日期和時間。匯入會加入現有行程。`:'';checkRows();
  }
  function showKind(value){
   kind=value==='gpt'?'gpt':'maps';$('gpt-prompt-panel').hidden=kind!=='gpt';$('gpt-prompt').value=buildGptPrompt(scope.days,scope.trip||{});$('gpt-copy-status').textContent='';
@@ -66,23 +85,34 @@ export function initImport({canWrite,getScope,onSave,onChange,onClose}){
   if(!canWrite())return;scope=getScope();rows=[];dirty=false;$('import-form').reset();$('import-day').innerHTML=options(day);$('import-time').value='09:00';$('import-error').textContent='';showKind(type);$('gpt-prompt-panel').open=true;render();$('import-dialog').showModal();$(kind==='gpt'?'gpt-copy':'import-text').focus();
  }
  function close(){dirty=false;scope=null;rows=[];$('import-dialog').close();onChange();onClose();}
- const api={open,close,get dirty(){return dirty;},lock(locked){for(const id of ['import-open','gpt-import-open'])$(id).disabled=locked||!canWrite();for(const el of $('import-form').querySelectorAll('input,textarea,select,button'))el.disabled=el.hasAttribute('data-import-close')?working:locked||working||!canWrite();},snapshot(){return dirty&&scope?{scope,kind,prompt:kind==='gpt'?$('gpt-prompt').value:undefined,rows:rows.length?collect():[],text:$('import-text').value,day:$('import-day').value,time:$('import-time').value}:null;},restore(saved){scope=saved.scope;rows=saved.rows||[];dirty=true;$('import-day').innerHTML=options(Number(saved.day));$('import-time').value=saved.time;$('import-text').value=saved.text;$('import-error').textContent='';showKind(saved.kind);if(typeof saved.prompt==='string')$('gpt-prompt').value=saved.prompt;$('gpt-prompt-panel').open=false;render();$('import-dialog').showModal();}};
+ const api={open,close,get dirty(){return dirty;},lock(locked){for(const id of ['import-open','gpt-import-open'])$(id).disabled=locked||!canWrite();for(const el of $('import-form').querySelectorAll('input,textarea,select,button'))el.disabled=el.hasAttribute('data-import-close')?working:locked||working||!canWrite();if(scope&&!locked&&!working)checkRows();},snapshot(){return dirty&&scope?{scope,kind,prompt:kind==='gpt'?$('gpt-prompt').value:undefined,rows:rows.length?collect():[],text:$('import-text').value,day:$('import-day').value,time:$('import-time').value}:null;},restore(saved){scope=saved.scope;rows=saved.rows||[];dirty=true;$('import-day').innerHTML=options(Number(saved.day));$('import-time').value=saved.time;$('import-text').value=saved.text;$('import-error').textContent='';showKind(saved.kind);if(typeof saved.prompt==='string')$('gpt-prompt').value=saved.prompt;$('gpt-prompt-panel').open=false;render();$('import-dialog').showModal();}};
  $('import-open').addEventListener('click',()=>open(Number($('toolbar-add').dataset.add)));
  $('gpt-import-open').addEventListener('click',()=>open(Number($('toolbar-add').dataset.add),'gpt'));
  for(const button of document.querySelectorAll('[data-import-type]'))button.addEventListener('click',()=>{if(working||!canWrite())return;const next=button.dataset.importType;if(next===kind)return;rows=[];$('import-text').value='';$('import-error').textContent='';showKind(next);render();dirty=true;onChange();});
- $('gpt-copy').addEventListener('click',async()=>{try{await navigator.clipboard.writeText($('gpt-prompt').value);$('gpt-copy-status').textContent='提示詞已複製，貼給 ChatGPT 或其他 AI。';}catch{$('gpt-prompt').focus();$('gpt-prompt').select();$('gpt-copy-status').textContent='請複製已選取的提示詞，再貼給 AI。';}});
- $('import-preview').addEventListener('click',()=>{
-  try{rows=(kind==='gpt'?parseGptImport($('import-text').value,scope.days):parseImportText($('import-text').value).map(row=>({...row,day:Number($('import-day').value),time:$('import-time').value||'09:00'}))).map(row=>({...row,id:crypto.randomUUID()}));dirty=true;render();$('import-error').textContent='';if(kind==='gpt')$('gpt-prompt-panel').open=false;onChange();}
+ async function updatePrompt(copy=false){
+  if(working||!canWrite())return;working=true;api.lock(true);$('gpt-copy-status').textContent='正在取得目前行程…';
+  try{await freshScope();$('gpt-prompt').value=refreshGptPrompt($('gpt-prompt').value,scope.days,scope.trip||{});render();dirty=true;onChange();
+   if(copy){try{await navigator.clipboard.writeText($('gpt-prompt').value);$('gpt-copy-status').textContent='已帶入目前行程並複製，貼給 ChatGPT 或其他 AI。';}catch{$('gpt-copy-status').textContent='已更新目前行程；請複製提示詞後貼給 AI。';}}
+   else $('gpt-copy-status').textContent='已帶入目前行程、班機與固定時間，保留你填寫的需求。';
+  }catch(error){$('gpt-copy-status').textContent='未更新或複製：'+error.message;}
+  finally{working=false;api.lock(false);if(copy&&$('gpt-copy-status').textContent.startsWith('已更新')){$('gpt-prompt').focus();$('gpt-prompt').select();}}
+ }
+ $('gpt-refresh').addEventListener('click',()=>void updatePrompt());
+ $('gpt-copy').addEventListener('click',()=>void updatePrompt(true));
+ $('import-preview').addEventListener('click',async()=>{
+  if(working||!canWrite())return;working=true;api.lock(true);
+  try{if(kind==='gpt')await freshScope();rows=(kind==='gpt'?parseGptImport($('import-text').value,scope.days):parseImportText($('import-text').value).map(row=>({...row,day:Number($('import-day').value),time:$('import-time').value||'09:00'}))).map(row=>({...row,id:crypto.randomUUID()}));dirty=true;render();$('import-error').textContent=checkRows().length?'請調整下方標示的重複或重疊行程，再匯入。':'';if(kind==='gpt')$('gpt-prompt-panel').open=false;onChange();}
   catch(error){$('import-error').textContent=error.message;}
+  finally{working=false;api.lock(false);}
  });
  $('import-apply').addEventListener('click',()=>{rows=collect().map(row=>({...row,day:Number($('import-day').value),time:$('import-time').value}));dirty=true;render();onChange();});
  $('import-rows').addEventListener('click',event=>{const button=event.target.closest('[data-import-remove]');if(!button)return;rows=collect();rows.splice(Number(button.dataset.importRemove),1);dirty=true;render();onChange();});
  $('import-rows').addEventListener('input',event=>{if(event.target.name!=='importPlace')return;const row=event.target.closest('[data-import-row]');row.querySelector('a').href='https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(event.target.value.trim());});
  $('import-text').addEventListener('input',()=>{rows=[];render();$('import-error').textContent='';});
- for(const type of ['input','change'])$('import-form').addEventListener(type,()=>{dirty=true;onChange();});
+ for(const type of ['input','change'])$('import-form').addEventListener(type,()=>{dirty=true;if(rows.length)checkRows();onChange();});
  $('import-form').addEventListener('submit',async event=>{
   event.preventDefault();if(!rows.length||working||!canWrite())return;rows=collect();working=true;api.lock(true);$('import-error').textContent=kind==='gpt'?'正在儲存 AI 行程…':'正在確認分享地點…';
-  try{await onSave(rows,scope);if($('import-dialog').open)$('import-error').textContent='修改尚未儲存，請依畫面提示重試或處理衝突。';}
+  try{if(kind==='gpt'){await freshScope();render();if(checkRows().length)throw Error('目前行程已有更新，請調整下方的重複或重疊項目。');}await onSave(rows,scope,kind);if($('import-dialog').open)$('import-error').textContent='修改尚未儲存，請依畫面提示重試或處理衝突。';}
   catch(error){$('import-error').textContent=error.message;}
   finally{working=false;api.lock(false);onChange();}
  });

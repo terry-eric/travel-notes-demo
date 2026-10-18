@@ -21,6 +21,7 @@ import {tagCategory,tagOptions,renderCardTag,applyStopTag} from './tags.js';
 import {renderStopAvatar,stopAvatarLabel} from './stop-avatar.js';
 import {initReorder,initOverviewReorder,moveStop,moveStopBetweenDays} from './reorder.js';
 import {initImport,insertImported} from './import.js';
+import {reviewImport} from './import-review.js';
 const resolvedPlaces=new Map(),placeRequests=new Map(),placeErrors=new Map();
 let transportLoading=false;
 let routeMap=null,overviewMap=null,dailyRouteMap=null,routeMapScope="day",dayNameDraft=null;
@@ -150,7 +151,13 @@ const autoSync=createAutoSync({
   else $('save-status').textContent='同步暫時中斷，將自動重試';
  }
 });
-const importer=initImport({canWrite:()=>canChange()&&!transportDirty&&!stayDraft,getScope:scopeSnapshot,onSave:importRows,onChange:persistDraft,onClose:()=>void autoSync.tick()});
+async function freshImportScope(){
+ const epoch=identityEpoch,data=await fetchJson();
+ if(epoch!==identityEpoch||data.trip?.id!==tripId)throw Error('登入或旅行已變更，請重新開啟匯入。');
+ applyTripRole(data.role);if(!canChange())throw Error('目前無法編輯這趟旅行。');
+ cacheConfirmed(data);return {tripId,trip:data.trip||currentTrip,days:data.days,revision:data.revision};
+}
+const importer=initImport({canWrite:()=>canChange()&&!transportDirty&&!stayDraft,getScope:scopeSnapshot,getFreshScope:freshImportScope,onSave:importRows,onChange:persistDraft,onClose:()=>void autoSync.tick()});
 initReorder($('timeline'),{canStart:()=>canChange()&&!transportDirty&&!stayDraft&&!timelineEditorId&&!transportEditorId,onStart:()=>{dragging=true;return {...scopeSnapshot(),day:activeDay};},onFinish:()=>{dragging=false;lock();void autoSync.tick();},onMove:reorderStop});
 function canSortOverview(){return canChange()&&!dragging&&!editorDirty&&!$('editor').open&&!$('import-dialog').open&&!$('transport-dialog').open&&!importer.dirty&&!transportDirty&&!stayDraft&&!timelineEditorId&&!transportEditorId&&!dayNameDraft&&!document.activeElement?.matches('[name="dayName"]');}
 initOverviewReorder($('board'),{canStart:canSortOverview,onStart:()=>{dragging=true;return scopeSnapshot();},onFinish:()=>{dragging=false;lock();void autoSync.tick();},onMove:moveOverviewStop});
@@ -201,7 +208,7 @@ function showPage(page,{record=true,focus=true}={}){
  document.title=`${pageLabels[currentPage]}｜旅手帖`;
  document.querySelectorAll('[data-page-link]').forEach(link=>{link.href=routeUrl(link.dataset.pageLink,activeDay,activeStop);const selected=link.dataset.pageLink===currentPage;link.classList.toggle('nav-active',selected);if(selected)link.setAttribute('aria-current','page');else link.removeAttribute('aria-current');});
  const canEdit=access.canEdit&&['overview','daily','map'].includes(currentPage);
- for(const id of ['undo','toolbar-add','import-open','gpt-import-open'])$(id).hidden=!canEdit;
+ for(const id of ['undo','toolbar-add','import-open','gpt-import-open','flight-add'])$(id).hidden=!canEdit;
  $('sharing-open').hidden=currentPage==='trips'||(demoMode?!access.canEdit:!access.canShare);
  $('trip-photo-credit').hidden=currentPage==='trips'||currentTrip?.id!=='legacy-hokkaido-2026';$('trip-footer-note').hidden=currentPage==='trips';
  const url=routeUrl(currentPage,activeDay,activeStop);
@@ -294,7 +301,7 @@ async function resolveConflicts(choices){
  if(!pending?.merge||busy)return;
  const latest=pending.merge.remote,result=mergeTrip(pending.base,pending.days,latest.days,choices);pending.merge.choices=choices;
  if(result.unresolved.length){conflictUI.show(result.conflicts,choices);conflictUI.message('請為每個衝突選擇保留的版本。');persistDraft();return;}
- const merged=mergedSchedule(result.days,latest.days);pending.base=clone(latest.days);pending.days=merged.days;pending.revision=latest.revision;pending.mutationId=crypto.randomUUID();pending.merge=null;pending.message='已依你的選擇合併並儲存。'+merged.reason;conflict=false;conflictUI.close();persistDraft();await commit(null,null,null,null,true);
+ const merged=mergedSchedule(result.days,latest.days);if(pending.importGuard)pending.importGuard.trip=latest.trip||currentTrip;pending.base=clone(latest.days);pending.days=merged.days;pending.revision=latest.revision;pending.mutationId=crypto.randomUUID();pending.merge=null;pending.message='已依你的選擇合併並儲存。'+merged.reason;conflict=false;conflictUI.close();persistDraft();await commit(null,null,null,null,true);
 }
 
 function cardTagValue(stop){return tagDraft?.id===stop.id?tagDraft.value:stop.tag||'其他';}
@@ -507,27 +514,33 @@ async function loadSnapshot(){
   $('sync-error-text').textContent=error.message;$('retry').textContent=authExpired?'重新登入':'重新連線';$('sync-error').hidden=false;
  }finally{if(epoch===identityEpoch){busy=false;lock();}}
 }
-async function commit(next,message,day=activeDay,stop=activeStop,retry=false,transport=false,scope=null,stayId=null,tagId=null){
+function assertImportedSchedule(next,guard,trip){
+ if(!guard)return;const ids=new Set(guard.rows.map(row=>row.id)),rows=next.flatMap((day,d)=>day.stops.filter(stop=>ids.has(stop.id)).map(stop=>({...stop,day:d})));
+ const existing=next.map(day=>({...day,stops:day.stops.filter(stop=>!ids.has(stop.id))})),problems=reviewImport(rows,existing,trip||{});
+ if(problems.length){const error=Error('匯入行程與最新安排有衝突：'+problems[0].message+' 請調整匯入項目後再儲存。');error.status=400;throw error;}
+}
+async function commit(next,message,day=activeDay,stop=activeStop,retry=false,transport=false,scope=null,stayId=null,tagId=null,importGuard=null){
  if(conflict){showConflicts();return false;}
  if(tagDraft&&!tagId&&!retry){notice('標籤尚未儲存，請先重試儲存。');return false;}
  if(transportDirty&&!transport&&!retry){notice('請先儲存或取消卡片之間的交通時間。');return false;}
  if(stayDraft&&!stayId&&!retry){notice('請先完成或取消時間編輯。');return false;}
  if(!tripId||!access.canEdit||!ready||busy)return false;
  if(scope?.tripId&&scope.tripId!==tripId||pending?.tripId&&pending.tripId!==tripId){notice('這份草稿屬於其他旅行，請回到原旅行儲存。');return false;}
- if(!retry)pending={tripId,base:clone(scope?.days||days),days:clearStaleTravel(next),revision:scope?.revision??revision,mutationId:crypto.randomUUID(),message,day,stop,transport,stayId,tagId};
+ if(!retry)pending={tripId,base:clone(scope?.days||days),days:clearStaleTravel(next),revision:scope?.revision??revision,mutationId:crypto.randomUUID(),message,day,stop,transport,stayId,tagId,...(importGuard?{importGuard}: {})};
  const task=pending;if(!task)return false;const epoch=identityEpoch;busy=true;$('save-status').textContent='正在儲存…';lock();
  persistDraft();
  try{
   let result;
   for(let attempt=0;attempt<4;attempt++){
-   try{result=await fetchJson({method:'PUT',headers:{'Content-Type':'application/json','X-Trip-Client':'multi-2'},body:JSON.stringify({days:task.days,revision:task.revision,mutationId:task.mutationId})});break;}
+   try{assertImportedSchedule(task.days,task.importGuard,task.importGuard?.trip||currentTrip);result=await fetchJson({method:'PUT',headers:{'Content-Type':'application/json','X-Trip-Client':'multi-2'},body:JSON.stringify({days:task.days,revision:task.revision,mutationId:task.mutationId})});break;}
      catch(error){
       if(epoch!==identityEpoch)return false;
       if(error.status!==409)throw error;
       const latest=await fetchJson(),merged=mergeTrip(task.base,task.days,latest.days);
       if(epoch!==identityEpoch)return false;
     if(merged.unresolved.length){task.merge={remote:latest,choices:{}};conflict=true;$('save-status').textContent='有欄位衝突，請選擇保留版本';$('sync-error-text').textContent='未儲存內容已保留，請處理衝突。';$('retry').textContent='處理衝突';$('sync-error').hidden=false;showConflicts();persistDraft();return false;}
-    const checked=mergedSchedule(merged.days,latest.days);task.base=clone(latest.days);task.days=checked.days;task.revision=latest.revision;task.mutationId=crypto.randomUUID();task.message='已自動合併其他人的修改。'+checked.reason;persistDraft();
+    assertImportedSchedule(merged.days,task.importGuard,latest.trip||currentTrip);
+    const checked=mergedSchedule(merged.days,latest.days);assertImportedSchedule(checked.days,task.importGuard,latest.trip||currentTrip);if(task.importGuard)task.importGuard.trip=latest.trip||currentTrip;task.base=clone(latest.days);task.days=checked.days;task.revision=latest.revision;task.mutationId=crypto.randomUUID();task.message='已自動合併其他人的修改。'+checked.reason;persistDraft();
    }
   }
   if(epoch!==identityEpoch)return false;
@@ -602,8 +615,9 @@ async function moveOverviewStop(id,day,to,scope=scopeSnapshot()){
  if(saved){const card=[...$('board').querySelectorAll('[data-overview-stop-id]')].find(item=>item.dataset.overviewStopId===id);card?.scrollIntoView({block:'nearest',inline:'nearest',behavior:'instant'});card?.focus({preventScroll:true});}return saved;
 }
 async function move(index,step){const to=index+step;if(to<0||to>=days[activeDay].stops.length)return;await reorderStop(days[activeDay].stops[index].id,to);}
-async function importRows(rows,scope){
+async function importRows(rows,scope,kind='maps'){
  if(!canChange())return;
+ const epoch=identityEpoch,permissions=permissionEpoch;
  // Complete place resolution before constructing the single cloud mutation.
  const unknown=rows.filter(row=>!row.q);let cursor=0,completed=0;
  const resolved=await Promise.allSettled(Array.from({length:Math.min(3,unknown.length)},async()=>{
@@ -611,8 +625,10 @@ async function importRows(rows,scope){
    if(!row.q)throw Error('無法讀取「'+row.name+'」的分享地點，請確認連結後重試。');}
  }));
  const failed=resolved.find(result=>result.status==='rejected');if(failed)throw failed.reason;
+ if(epoch!==identityEpoch||permissions!==permissionEpoch||scope.tripId!==tripId||!canChange())throw Error('登入或旅行權限已變更，請重新開啟匯入。');
  const next=insertImported(scope.days,rows),last=rows.at(-1),index=next[last.day].stops.findIndex(s=>s.id===last.id);
- await commit(next,'已匯入 '+rows.length+' 個行程',last.day,index,false,false,scope);
+ const saved=await commit(next,'已匯入 '+rows.length+' 個行程',last.day,index,false,false,scope,null,null,kind==='gpt'?{rows,trip:scope.trip}:null);
+ if(!saved&&!pending&&!conflict)throw Error($('form-error').textContent||'行程尚未儲存，請確認目前的登入及編輯權限。');
 }
 document.addEventListener('click',e=>{
  if(e.target.closest('.card-tag-control'))return;
@@ -632,6 +648,7 @@ document.addEventListener('click',e=>{
  if(action.hasAttribute('data-map-stop')){if(dayNameDraft||transportDirty)return;setDay(Number(action.dataset.mapDay),Number(action.dataset.mapStop));return;}
  if(action.hasAttribute('data-close')){if(!pending&&!conflict){editing=null;editorDirty=false;editorScope=null;persistDraft();}$('editor').close();return;}
  if(action.hasAttribute('data-details')){const day=Number(action.dataset.owner),index=Number(action.dataset.details);setDay(day,index);openEditor(day,index,null,true);return;}
+ if(action.id==='flight-add'){if(!canChange()||$('editor').open)return;openEditor(activeDay);if($('editor').open){$('field-kind').value='flight';updateFlightEditor();$('field-name').value='航班';$('editor-title').textContent='新增班機';$('editor-flight-fields').querySelector('input').focus();}return;}
  if(action.hasAttribute('data-add')){openEditor(Number(action.dataset.add));return;}
  if(action.hasAttribute('data-edit')){openEditor(Number(action.dataset.owner),Number(action.dataset.edit));return;}
  if(action.hasAttribute('data-remove')){void remove(Number(action.dataset.owner),Number(action.dataset.remove));return;}

@@ -19,6 +19,9 @@
 .gpt-prompt-panel textarea{width:100%;font-family:inherit;line-height:1.6;min-height:180px}
 .gpt-prompt-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
 .gpt-prompt-actions>*{text-align:center}
+.import-row-conflict{border-color:#bd6659;background:#fff8f5}
+.import-review{grid-column:1/-1;font-size:13px;line-height:1.7;color:#a34635;margin:0}
+.import-review:empty{display:none}
 #gpt-copy-status:empty{display:none}
 .import-preview{margin-block:12px 6px}
 .import-row .import-place,.import-meta{grid-column:1/-1}
