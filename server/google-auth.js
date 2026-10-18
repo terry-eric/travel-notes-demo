@@ -28,7 +28,10 @@ export function safeReturnTo(value,path=base,trustedOrigin=origin){
 let certificates=null;
 export async function googleKeys(kid){
  if(certificates?.expires>Date.now()&&(certificates.keys.some(key=>key.kid===kid)||certificates.fetched>Date.now()-30000))return certificates.keys;
- const response=await fetch(GOOGLE_JWKS_URL,{signal:AbortSignal.timeout(5000),redirect:'error'});
+ // workerd supports manual/follow, but rejects redirect:'error' with TypeError.
+ // Keep Google keys pinned to this exact endpoint and reject any redirect.
+ const response=await fetch(GOOGLE_JWKS_URL,{signal:AbortSignal.timeout(5000),redirect:'manual'});
+ if((response.status>=300&&response.status<400)||response.redirected)throw Error('Google certificates redirect rejected');
  if(!response.ok)throw Error('Google verification unavailable');
  const data=await response.json();if(!Array.isArray(data.keys)||data.keys.length>20)throw Error('Invalid certificates');
  const age=Number(/(?:^|,)\s*max-age=(\d+)/i.exec(response.headers.get('Cache-Control')||'')?.[1]||300);

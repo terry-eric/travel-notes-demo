@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {localDatabase} from '../scripts/local-db.mjs';
-import {verifyGoogleIdToken,loginChallenge,googleLogin,googleLogout,googleIdentity,tokenHash,randomToken,safeReturnTo,googleTarget,SESSION_COOKIE,CHALLENGE_COOKIE} from '../server/google-auth.js';
+import {verifyGoogleIdToken,loginChallenge,googleLogin,googleLogout,googleIdentity,tokenHash,randomToken,safeReturnTo,googleTarget,SESSION_COOKIE,CHALLENGE_COOKIE,GOOGLE_JWKS_URL} from '../server/google-auth.js';
 const clientId='123-google-test.apps.googleusercontent.com',origin='https://demo.terry878.org',now=20000;
 const pair=await crypto.subtle.generateKey({name:'RSASSA-PKCS1-v1_5',modulusLength:2048,publicExponent:new Uint8Array([1,0,1]),hash:'SHA-256'},true,['sign','verify']);
 const jwk={...await crypto.subtle.exportKey('jwk',pair.publicKey),kid:'google-auth-test-key',alg:'RS256',use:'sig'};
@@ -33,6 +33,15 @@ test('Authentication diagnostics emit only fixed failure enums and never change 
  assert.equal(await inspect(await signed(body),async()=>[{...jwk,e:undefined}]),null);assert.match(reasons.pop(),/^key_import_(?:TypeError|DataError|OperationError|Error)$/);
  assert.deepEqual(await inspect(await signed(body)),{email:'person@gmail.com',sub:'google-person'});assert.equal(reasons.length,0);
  assert.equal(await verifyGoogleIdToken('invalid',config,keys,now,()=>{throw Error('diagnostic unavailable');}),null);
+});
+test('Google certificates stay on the fixed endpoint, reject redirects, and retain the bounded key cache',async()=>{
+ const realFetch=globalThis.fetch,{googleKeys}=await import('../server/google-auth.js?certificate-policy-regression');let calls=0,redirected=true;
+ globalThis.fetch=async(url,options)=>{calls++;assert.equal(url,GOOGLE_JWKS_URL);assert.equal(options.redirect,'manual');assert.ok(options.signal instanceof AbortSignal);return redirected?new Response(null,{status:302,headers:{Location:'https://other-origin.invalid/keys'}}):Response.json({keys:[jwk]},{headers:{'Cache-Control':'max-age=3600'}});};
+ try{
+  await assert.rejects(googleKeys(jwk.kid),/redirect rejected/);assert.equal(calls,1);
+  redirected=false;assert.deepEqual(await googleKeys(jwk.kid),[jwk]);assert.equal(calls,2);
+  assert.deepEqual(await googleKeys(jwk.kid),[jwk]);assert.equal(calls,2);
+ }finally{globalThis.fetch=realFetch;}
 });
 test('Google login supports authoritative Gmail and Workspace, and rejects third-party Google emails',async()=>{
  const nonce=randomToken(),config={clientId,nonceHash:await tokenHash(nonce)};

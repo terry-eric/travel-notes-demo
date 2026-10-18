@@ -4,13 +4,11 @@
 
 [開啟旅手帖](https://demo.terry878.org/trip) · [GitHub 原始碼](https://github.com/terry-eric/travel-notes-demo) · [GitHub Pages 入口](https://terry-eric.github.io/travel-notes-demo/)
 
-正式入口為 **https://demo.terry878.org/trip**。本版已準備直接 Google 登入：完成 Google OAuth 設定、資料表遷移、限速綁定及部署後，每個人可用自己的 Google 帳號登入，以該帳號已驗證的 email 管理旅行；只有擁有者與該行程受邀的成員可以取得內容。資料儲存在雲端並支援跨裝置同步。GitHub Pages 會轉到同一個正式入口，不載入示範旅行或另一份資料庫。
-
-目前正式網域的 Google 登入回呼仍在驗證，尚未確認整個啟用流程完成；以下提供此版本的設定與使用方式。
+正式入口為 **https://demo.terry878.org/trip**，已啟用並驗證直接 Google 登入。使用自己的 Google 帳號登入後，以該帳號已驗證的 email 管理旅行；只有擁有者與該行程受邀的成員可以取得內容。資料儲存在雲端並支援跨裝置同步。GitHub Pages 會轉到同一個正式入口，不載入示範旅行或另一份資料庫。
 
 公開的是網站入口與原始碼；旅行內容不會因為網站開放而變成公開資料。請將正式服務網址交給要使用的人，登入後從「我的旅行」開始。
 
-直接 Google 登入模式不依賴 Cloudflare Access，也不占用 Access 的使用者席次；切換完成前，既有部署仍可能顯示原本的 Access 登入頁。Cloudflare Workers 與 D1 的運算、請求和儲存額度仍由所有使用者共用；相關限制見下方部署說明。
+正式服務直接使用 Google 登入，不依賴 Cloudflare Access，也不占用 Access 的使用者席次。Cloudflare Workers 與 D1 的運算、請求和儲存額度仍由所有使用者共用；相關限制見下方部署說明。
 
 ## 三種執行方式
 
@@ -207,7 +205,7 @@ SQL 本身不會帶入私人旅行資料。這個公開儲存庫的部署範本�
 
 登入挑戰有效 10 分鐘且只能使用一次。登入成功後使用 24 小時網站 session；cookie 為 Secure、HttpOnly、SameSite=Lax，只套用在 `APP_BASE` 內。D1 保存 session 的雜湊與到期時間，不保存 Google 密碼；每個 Google 帳號最多保留 10 個網站 session。登出會撤銷目前網站 session，登入 Google 的其他網站不受影響。
 
-同一瀏覽器開啟多個登入頁時，每頁各自有 10 分鐘、一次性的驗證挑戰，共用已建立的 HttpOnly 瀏覽器 cookie；再開登入頁不會取消前一頁尚未完成的挑戰。任一頁登入成功或登出會清除挑戰 cookie，其他尚未完成的登入頁需重新整理，或使用已建立的網站登入 session。這是本版程式的處理方式；正式網域的完整回呼流程仍待驗證。
+同一瀏覽器開啟多個登入頁時，每頁各自有 10 分鐘、一次性的驗證挑戰，共用已建立的 HttpOnly 瀏覽器 cookie；再開登入頁不會取消前一頁尚未完成的挑戰。任一頁登入成功或登出會清除挑戰 cookie，其他尚未完成的登入頁需重新整理，或使用已建立的網站登入 session。
 
 行程權限仍以已驗證 email 判定。新帳號從自己的空白旅行清單開始，擁有者可邀請特定 email 作為 viewer 或 editor。邀請不會寄出 email，請另行交付正式網域的旅行連結。登入公開網站不會取得其他人的旅行。
 
@@ -381,6 +379,7 @@ _site/               選配本機合成預覽產物；不發布至 Pages
 - **Pages 還看到舊示範：** 等待最新的 Pages workflow 部署成功後重新整理；正式入口為 `https://demo.terry878.org/trip`。舊示範在瀏覽器中的修改不會自動轉到雲端。
 - **503「部署網址尚未設定」：** 檢查 `APP_HOST`、`APP_BASE` 的格式；hostname 要小寫、不能帶 `https://`，base 不能有結尾 `/`。
 - **Google 登入未啟用：** 確認 `AUTH_MODE=google`、`GOOGLE_CLIENT_ID` 是自己的 Web application ID、`0005_google_sessions.sql` 已套用，以及三個 `AUTH_*_LIMITER` 綁定都存在。不要把 Maps API key 當成登入 client ID。
+- **無法確認 Google 帳號：** 本版已修正公鑰讀取在 workerd 拋出 `keys_fetch_TypeError` 的問題：使用 `redirect: 'manual'`，並在解析金鑰前拒絕所有重新導向。不要改成跟隨任意轉址或關閉簽章驗證。測試包含真正 workerd 的本機公鑰來源與拒絕轉址案例；初次執行前先安裝專案依賴。[Cloudflare 執行環境的轉址驗證](https://github.com/cloudflare/workerd/blob/main/src/workerd/api/http.c%2B%2B#L446)
 - **API 回傳 429：** 暫停密集重試並稍後重試；檢查該限速 binding 的 namespace 是否與別的應用程式共用。限速不是帳務硬上限。
 - **登入提示帳號 email 已變更或身分需移轉：** Google 固定帳號 ID 與原 email 的對應不一致，需由管理者核對後處理；不要改用 email header 或刪除 `auth_identities` 來繞過驗證。
 - **Google 顯示 origin 不允許：** Authorized JavaScript origins 要填正式網站來源，例如 `https://trip.example.com`，不含 `/trip`；也要檢查 OAuth Audience 是否允許該登入帳號。
