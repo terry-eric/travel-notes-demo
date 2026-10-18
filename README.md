@@ -6,6 +6,8 @@
 
 正式入口為 **https://demo.terry878.org/trip**。本版已準備直接 Google 登入：完成 Google OAuth 設定、資料表遷移、限速綁定及部署後，每個人可用自己的 Google 帳號登入，以該帳號已驗證的 email 管理旅行；只有擁有者與該行程受邀的成員可以取得內容。資料儲存在雲端並支援跨裝置同步。GitHub Pages 會轉到同一個正式入口，不載入示範旅行或另一份資料庫。
 
+目前正式網域的 Google 登入回呼仍在驗證，尚未確認整個啟用流程完成；以下提供此版本的設定與使用方式。
+
 公開的是網站入口與原始碼；旅行內容不會因為網站開放而變成公開資料。請將正式服務網址交給要使用的人，登入後從「我的旅行」開始。
 
 直接 Google 登入模式不依賴 Cloudflare Access，也不占用 Access 的使用者席次；切換完成前，既有部署仍可能顯示原本的 Access 登入頁。Cloudflare Workers 與 D1 的運算、請求和儲存額度仍由所有使用者共用；相關限制見下方部署說明。
@@ -194,14 +196,18 @@ SQL 本身不會帶入私人旅行資料。這個公開儲存庫的部署範本�
 此模式不需要 Cloudflare Access application，也不需要 Google client secret 或 Maps API key。Google Identity Services 使用 Web application client ID；身份驗證用途只需要基本的 email／profile／openid，不要求 Gmail、Drive 等資料存取權限。[Google 登入設定](https://developers.google.com/identity/gsi/web/guides/get-google-api-clientid)
 
 1. 在 Google Cloud 選擇自己的專案，開啟 **Google Auth Platform → Branding**，設定應用程式名稱、支援 email、正式網站網址及隱私政策；Authorized domains 填自己的主網域，例如 `example.com`。本版提供 `/trip/privacy` 隱私說明頁；若改動 `APP_BASE`，使用對應的路徑。
-2. 在 **Audience** 設定可使用的帳號。若要對外開放，使用 External 並依 Google 介面完成發布；Testing 模式可能限制測試使用者。完成 Google 要求的驗證或品牌設定後再對外提供登入。
+2. 在 **Audience** 選擇 **External**，讓組織以外的 Google 帳號可登入。本版只使用 Sign in with Google 的基本 `openid`、`email`、`profile` 身分資料：依 Google 官方例外，即使維持 Testing，使用者也不必加入測試名單，不受一般 Testing 的 100 位測試使用者名單限制，這類授權不會在 7 天後到期。網站本身的 24 小時 session 仍照常到期。若日後增加其他 OAuth scopes，就不能沿用此例外，必須重新檢查發布狀態、測試限制及敏感／受限權限的驗證要求。[Google Audience 與基本登入例外](https://support.google.com/cloud/answer/15549945)
 3. 在 **Clients → Create client** 選擇 **Web application**。Authorized JavaScript origins 填 **`https://trip.example.com`**，不加 `/trip` 或其他路徑。這個版本使用 Google 彈出視窗的 JavaScript callback，無需另填登入 Redirect URI。
 4. 把產生的 client ID 放入 `wrangler.jsonc` 的 `vars.GOOGLE_CLIENT_ID`，並明確設定 `vars.AUTH_MODE` 為 `google`。Client ID 是公開設定；不應把 client secret 或其他憑證貼進前端。
 5. 套用上一步的 `0005_google_sessions.sql`，設定三個 `AUTH_*_LIMITER` 綁定，完成下方建置與部署。如果原本有 Cloudflare Access 保護同一個 `/trip` 網址，先保持原設定，等確認 Google 設定與 Worker 部署都正確後，再撤下該網址的 Access application 保護，避免使用者被導向舊的 email OTP 登入頁。
 
+基本 Google 登入不需要先完成品牌驗證；尚未驗證品牌時，Google 登入同意畫面顯示應用程式網域。若要顯示自己的應用程式名稱及 logo，才需要依 Google 的流程驗證並發布品牌。品牌展示驗證與敏感資料權限驗證是分開的要求。[Google 品牌設定與驗證](https://support.google.com/cloud/answer/15549049)
+
 部署後開啟 `https://trip.example.com/trip/login`，使用官方 **使用 Google 帳號登入** 按鈕。伺服器檢查 Google ID token 的 RS256 簽章、issuer、client ID、有效時間、已驗證 email 及一次性 nonce；不能只傳 email 或自行編寫身分 header 代替登入。為確保 email 身分由 Google 掌握，此版本接受 Gmail 及 Google Workspace 的已驗證帳號；不接受只把第三方 email 綁到 Google 的帳號。
 
 登入挑戰有效 10 分鐘且只能使用一次。登入成功後使用 24 小時網站 session；cookie 為 Secure、HttpOnly、SameSite=Lax，只套用在 `APP_BASE` 內。D1 保存 session 的雜湊與到期時間，不保存 Google 密碼；每個 Google 帳號最多保留 10 個網站 session。登出會撤銷目前網站 session，登入 Google 的其他網站不受影響。
+
+同一瀏覽器開啟多個登入頁時，每頁各自有 10 分鐘、一次性的驗證挑戰，共用已建立的 HttpOnly 瀏覽器 cookie；再開登入頁不會取消前一頁尚未完成的挑戰。任一頁登入成功或登出會清除挑戰 cookie，其他尚未完成的登入頁需重新整理，或使用已建立的網站登入 session。這是本版程式的處理方式；正式網域的完整回呼流程仍待驗證。
 
 行程權限仍以已驗證 email 判定。新帳號從自己的空白旅行清單開始，擁有者可邀請特定 email 作為 viewer 或 editor。邀請不會寄出 email，請另行交付正式網域的旅行連結。登入公開網站不會取得其他人的旅行。
 

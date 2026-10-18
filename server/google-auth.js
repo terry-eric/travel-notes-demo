@@ -35,25 +35,43 @@ export async function googleKeys(kid){
  certificates={keys:data.keys,fetched:Date.now(),expires:Date.now()+Math.max(0,Math.min(age,3600))*1000};return certificates.keys;
 }
 // The issuer, keys endpoint and signature algorithm are fixed; token headers never choose a URL.
-export async function verifyGoogleIdToken(token,{clientId,nonceHash},getKeys=googleKeys,now=Math.floor(Date.now()/1000)){
+export async function verifyGoogleIdToken(token,{clientId,nonceHash},getKeys=googleKeys,now=Math.floor(Date.now()/1000),diagnostic){
+ const fail=reason=>{try{diagnostic?.(reason);}catch{}return null;};
+ let stage='token_format';
  try{
-  if(typeof token!=='string'||token.length>16384||typeof nonceHash!=='string')return null;
-  const parts=token.split('.');if(parts.length!==3)return null;
-  const header=json(parts[0]),claims=json(parts[1]);
-  if(!header||header.alg!=='RS256'||typeof header.kid!=='string'||header.kid.length>200)return null;
-  if(!claims||!['https://accounts.google.com','accounts.google.com'].includes(claims.iss)||claims.aud!==clientId||(claims.azp!==undefined&&claims.azp!==clientId))return null;
-  if(!Number.isInteger(claims.exp)||claims.exp<=now||!Number.isInteger(claims.iat)||claims.iat>now+60||claims.iat<now-7200||claims.exp-claims.iat>7200||claims.exp<=claims.iat||(claims.nbf!==undefined&&(!Number.isInteger(claims.nbf)||claims.nbf>now)))return null;
-  if(typeof claims.sub!=='string'||! /^[a-zA-Z0-9_-]{1,255}$/.test(claims.sub)||claims.email_verified!==true||typeof claims.email!=='string'||claims.email.length>254||! /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(claims.email))return null;
-  if(typeof claims.nonce!=='string'||! /^[A-Za-z0-9_-]{43}$/.test(claims.nonce)||await tokenHash(claims.nonce)!==nonceHash)return null;
+  if(typeof token!=='string'||token.length>16384||typeof nonceHash!=='string')return fail('token_format');
+  const parts=token.split('.');if(parts.length!==3)return fail('token_parts');
+  stage='header_decode';const header=json(parts[0]);stage='claims_decode';const claims=json(parts[1]);
+  if(!header||header.alg!=='RS256')return fail('header_algorithm');
+  if(typeof header.kid!=='string'||header.kid.length>200)return fail('header_key_id');
+  if(!claims||!['https://accounts.google.com','accounts.google.com'].includes(claims.iss))return fail('issuer');
+  if(claims.aud!==clientId)return fail('audience');
+  if(claims.azp!==undefined&&claims.azp!==clientId)return fail('authorized_party');
+  if(!Number.isInteger(claims.exp))return fail('expiration_type');
+  if(claims.exp<=now)return fail('expiration_expired');
+  if(!Number.isInteger(claims.iat))return fail('issued_at_type');
+  if(claims.iat>now+60)return fail('issued_at_future');
+  if(claims.iat<now-7200)return fail('issued_at_old');
+  if(claims.exp-claims.iat>7200||claims.exp<=claims.iat)return fail('token_lifetime');
+  if(claims.nbf!==undefined&&(!Number.isInteger(claims.nbf)||claims.nbf>now))return fail('not_before');
+  if(typeof claims.sub!=='string'||! /^[a-zA-Z0-9_-]{1,255}$/.test(claims.sub))return fail('subject_format');
+  if(claims.email_verified!==true)return fail('email_unverified');
+  if(typeof claims.email!=='string'||claims.email.length>254||! /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(claims.email))return fail('email_format');
+  if(typeof claims.nonce!=='string')return fail('nonce_type');
+  if(! /^[A-Za-z0-9_-]{43}$/.test(claims.nonce))return fail('nonce_format');
+  stage='nonce_hash';if(await tokenHash(claims.nonce)!==nonceHash)return fail('nonce_mismatch');
+  stage='keys_fetch';
   const keys=await getKeys(header.kid),jwk=keys.find(key=>key.kid===header.kid&&key.kty==='RSA'&&(!key.alg||key.alg==='RS256')&&(!key.use||key.use==='sig'));
-  if(!jwk)return null;
+  if(!jwk)return fail('key_lookup');
+  stage='key_import';
   const key=await crypto.subtle.importKey('jwk',jwk,{name:'RSASSA-PKCS1-v1_5',hash:'SHA-256'},false,['verify']);
-  if(!await crypto.subtle.verify('RSASSA-PKCS1-v1_5',key,decode(parts[2]),encoder.encode(parts[0]+'.'+parts[1])))return null;
+  stage='signature_decode';const signature=decode(parts[2]);stage='signature_verify';
+  if(!await crypto.subtle.verify('RSASSA-PKCS1-v1_5',key,signature,encoder.encode(parts[0]+'.'+parts[1])))return fail('signature_invalid');
   // Google is authoritative for Gmail and verified Workspace accounts, but not
   // for a third-party email that may have changed hands since Google verified it.
   if(!claims.email.toLowerCase().endsWith('@gmail.com')&&!(typeof claims.hd==='string'&&/^[a-zA-Z0-9.-]{1,253}$/.test(claims.hd)&&claims.hd.includes('.')))return {error:'unsupported_email'};
   return {email:claims.email.toLowerCase(),sub:claims.sub};
- }catch{return null;}
+ }catch(error){const name=['TypeError','SyntaxError','InvalidCharacterError','DataError','OperationError','NotSupportedError','TimeoutError','AbortError'].includes(error?.name)?error.name:'Error';return fail(stage+'_'+name);}
 }
 export async function googleIdentity(request,env,now=Math.floor(Date.now()/1000)){
  const token=requestCookie(request,SESSION_COOKIE);if(!token||!authConfigured(env))return null;
@@ -62,12 +80,13 @@ export async function googleIdentity(request,env,now=Math.floor(Date.now()/1000)
 }
 export async function loginChallenge(request,env,returnTo,now=Math.floor(Date.now()/1000)){
  const target=googleTarget(env);
- const token=randomToken(),nonce=randomToken(),previous=requestCookie(request,CHALLENGE_COOKIE);
+ // A browser can have several login pages open. Its HttpOnly cookie remains
+ // stable, while each page keeps an independent nonce and return destination.
+ const token=requestCookie(request,CHALLENGE_COOKIE)||randomToken(),nonce=randomToken(),challengeId=await tokenHash(nonce);
  const statements=[env.DB.prepare('DELETE FROM auth_login_challenges WHERE expires_at<=?').bind(now),env.DB.prepare('DELETE FROM auth_sessions WHERE expires_at<=?').bind(now)];
- if(previous)statements.push(env.DB.prepare('DELETE FROM auth_login_challenges WHERE token_hash=?').bind(await tokenHash(previous)));
- statements.push(env.DB.prepare('INSERT INTO auth_login_challenges(token_hash,nonce_hash,return_to,created_at,expires_at) SELECT ?,?,?,?,? WHERE (SELECT count(*) FROM auth_login_challenges)<10000').bind(await tokenHash(token),await tokenHash(nonce),safeReturnTo(returnTo,target.base,target.origin),now,now+LOGIN_TTL));
+ statements.push(env.DB.prepare('INSERT INTO auth_login_challenges(token_hash,nonce_hash,return_to,created_at,expires_at) SELECT ?,?,?,?,? WHERE (SELECT count(*) FROM auth_login_challenges)<10000').bind(await tokenHash(token+'.'+challengeId),challengeId,safeReturnTo(returnTo,target.base,target.origin),now,now+LOGIN_TTL));
  const results=await env.DB.batch(statements);if(results.at(-1).meta.changes!==1)throw Error('Login capacity unavailable');
- return {nonce,cookie:authCookie(CHALLENGE_COOKIE,token,LOGIN_TTL,target.base)};
+ return {nonce,challengeId,cookie:authCookie(CHALLENGE_COOKIE,token,LOGIN_TTL,target.base)};
 }
 const reply=(body,status=200,cookies=[])=>{const response=Response.json(body,{status,headers});for(const cookie of cookies)response.headers.append('Set-Cookie',cookie);return response;};
 function sameOrigin(request,env){const target=googleTarget(env);return new URL(request.url).origin===target.origin&&request.headers.get('Origin')===target.origin&&request.headers.get('Sec-Fetch-Site')!=='cross-site';}
@@ -77,16 +96,19 @@ async function loginBody(request){
  const reader=request.body?.getReader();if(!reader)return null;
  let size=0,raw='';const decoder=new TextDecoder();
  while(true){const {value,done}=await reader.read();if(done)break;size+=value.byteLength;if(size>18000){await reader.cancel();return null;}raw+=decoder.decode(value,{stream:true});}
- try{const body=JSON.parse(raw+decoder.decode());return body&&typeof body==='object'&&!Array.isArray(body)&&typeof body.credential==='string'?body:null;}catch{return null;}
+ try{const body=JSON.parse(raw+decoder.decode());return body&&typeof body==='object'&&!Array.isArray(body)&&typeof body.credential==='string'&&typeof body.challengeId==='string'&&/^[A-Za-z0-9_-]{43}$/.test(body.challengeId)?body:null;}catch{return null;}
 }
 export async function googleLogin(request,env,getKeys=googleKeys,now=Math.floor(Date.now()/1000)){
  if(request.method!=='POST')return reply({error:'不支援此操作。'},405);
  if(!sameOrigin(request,env))return reply({error:'請從本站登入。'},403);
  const challenge=requestCookie(request,CHALLENGE_COOKIE);if(!challenge)return reply({error:'登入已過期，請重新整理登入頁。'},401);
- const hash=await tokenHash(challenge),row=await env.DB.prepare('SELECT nonce_hash,return_to FROM auth_login_challenges WHERE token_hash=? AND expires_at>?').bind(hash,now).first();
+ const body=await loginBody(request);if(!body)return reply({error:'登入資料不完整，請重新整理登入頁後再試。'},400);
+ const hash=await tokenHash(challenge+'.'+body.challengeId),row=await env.DB.prepare('SELECT nonce_hash,return_to FROM auth_login_challenges WHERE token_hash=? AND nonce_hash=? AND expires_at>?').bind(hash,body.challengeId,now).first();
  if(!row)return reply({error:'登入已過期，請重新整理登入頁。'},401);
- const body=await loginBody(request);if(!body)return reply({error:'登入資料格式不正確。'},400);
- const identity=await verifyGoogleIdToken(body.credential,{clientId:env.GOOGLE_CLIENT_ID,nonceHash:row.nonce_hash},getKeys,now);
+ // A temporary, explicit diagnostic switch emits only a fixed reason enum.
+ // Never log claims, credentials, cookies, identity values or exception messages.
+ const diagnostic=env.AUTH_DIAGNOSTICS==='reason'?reason=>console.warn('google_auth_verification_failed',reason):undefined;
+ const identity=await verifyGoogleIdToken(body.credential,{clientId:env.GOOGLE_CLIENT_ID,nonceHash:row.nonce_hash},getKeys,now,diagnostic);
  if(!identity)return reply({error:'無法確認 Google 帳號，請重新登入。'},401);
  if(identity.error)return reply({error:'請使用 Gmail 或 Google Workspace 帳號登入。'},401);
  const boundSubject=await env.DB.prepare('SELECT email FROM auth_identities WHERE google_sub=?').bind(identity.sub).first();
@@ -107,9 +129,10 @@ export async function googleLogin(request,env,getKeys=googleKeys,now=Math.floor(
 export async function googleLogout(request,env){
  if(request.method!=='POST')return reply({error:'不支援此操作。'},405);
  if(!sameOrigin(request,env))return reply({error:'請從本站登出。'},403);
- const session=requestCookie(request,SESSION_COOKIE),challenge=requestCookie(request,CHALLENGE_COOKIE),statements=[];
+ const session=requestCookie(request,SESSION_COOKIE),statements=[];
  if(session)statements.push(env.DB.prepare('DELETE FROM auth_sessions WHERE token_hash=?').bind(await tokenHash(session)));
- if(challenge)statements.push(env.DB.prepare('DELETE FROM auth_login_challenges WHERE token_hash=?').bind(await tokenHash(challenge)));
+ // Pending login pages become unusable without the cleared HttpOnly cookie;
+ // independent nonce records are pruned at their original ten-minute expiry.
  if(statements.length)await env.DB.batch(statements);
  const target=googleTarget(env);
  return reply({ok:true},200,[authCookie(SESSION_COOKIE,'',0,target.base),authCookie(CHALLENGE_COOKIE,'',0,target.base)]);

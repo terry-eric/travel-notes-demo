@@ -20,7 +20,7 @@ test('verified direct Google sessions preserve legacy data while independent acc
   const challenge=await loginChallenge(new Request(base+'/login'),env,'/trip/trips',now);
   const payload=encode({alg:'RS256',kid:jwk.kid})+'.'+encode({iss:'https://accounts.google.com',aud:env.GOOGLE_CLIENT_ID,sub,email,email_verified:true,nonce:challenge.nonce,iat:now,exp:now+3600,...more});
   const signature=await crypto.subtle.sign('RSASSA-PKCS1-v1_5',keys.privateKey,new TextEncoder().encode(payload));
-  const response=await worker.fetch(new Request(base+'/api/auth/google',{method:'POST',headers:{Origin:origin,'Content-Type':'application/json',Cookie:challenge.cookie.split(';')[0]},body:JSON.stringify({credential:payload+'.'+Buffer.from(signature).toString('base64url')})}),env);
+  const response=await worker.fetch(new Request(base+'/api/auth/google',{method:'POST',headers:{Origin:origin,'Content-Type':'application/json',Cookie:challenge.cookie.split(';')[0]},body:JSON.stringify({challengeId:challenge.challengeId,credential:payload+'.'+Buffer.from(signature).toString('base64url')})}),env);
   if(expected===null)return response;
   assert.equal(response.status,expected);if(expected!==200){assert.equal(response.headers.get('Set-Cookie'),null);return response;}
   assert.equal((await response.json()).returnTo,'/trip/trips');

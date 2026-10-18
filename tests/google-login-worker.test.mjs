@@ -17,7 +17,7 @@ async function credential(nonce,email='owner@gmail.com',sub='google-owner'){
 }
 async function login(env,email,sub){
  const start=await worker.fetch(request('/login?return_to=%2Ftrip%2Ftrips'),env),html=await start.text(),nonce=/<script nonce="([^"]+)"/.exec(html)?.[1],challenge=start.headers.get('Set-Cookie')?.split(';')[0];
- const response=await worker.fetch(request('/api/auth/google','POST',{credential:await credential(nonce,email,sub)},challenge),env);
+ const response=await worker.fetch(request('/api/auth/google','POST',{challengeId:await tokenHash(nonce),credential:await credential(nonce,email,sub)},challenge),env);
  assert.equal(response.status,200);return response.headers.getSetCookie().find(value=>value.startsWith(SESSION_COOKIE+'=')).split(';')[0];
 }
 test('Google deployment fails closed without configuration and keeps exact host and path boundaries',async()=>{
@@ -85,7 +85,7 @@ test('Google sessions use a fork\'s configured hostname and nested or root path 
     assert.equal(start.status,200);const html=await start.text();
     assert.ok(html.includes(appBase+'/api/auth/google'));assert.ok(!html.includes('/trip/'));
     const nonce=/<script nonce="([^"]+)"/.exec(html)[1],challenge=start.headers.get('Set-Cookie').split(';')[0];
-    const loggedIn=await worker.fetch(req(appBase+'/api/auth/google','POST',{credential:await credential(nonce,'fork@gmail.com','fork-sub')},challenge),env);
+    const loggedIn=await worker.fetch(req(appBase+'/api/auth/google','POST',{challengeId:await tokenHash(nonce),credential:await credential(nonce,'fork@gmail.com','fork-sub')},challenge),env);
     assert.equal(loggedIn.status,200);assert.equal((await loggedIn.json()).returnTo,appBase+'/daily?day=2');
     const session=loggedIn.headers.getSetCookie().find(value=>value.startsWith(SESSION_COOKIE+'='));assert.ok(session.includes('Path='+(appBase||'/')+';'));
     const data=await worker.fetch(req(appBase+'/api/session','GET',undefined,session.split(';')[0]),env);
