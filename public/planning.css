@@ -16,6 +16,18 @@ body:not(.read-only) #board .mini-stop[data-overview-stop-id]{cursor:grab}
 .overview-stop-time{display:block;margin:0 0 6px;font:500 11px/1.5 system-ui,sans-serif;color:var(--muted);overflow-wrap:anywhere}
 .overview-stop-time::before{content:'';position:absolute;left:-4px;margin-top:5px;width:7px;height:7px;border-radius:50%;background:var(--day)}
 .overview-stop-row .mini-stop{margin:0}
+.fixed-stop-badge{display:inline-flex;align-items:center;gap:5px;max-width:100%;box-sizing:border-box;padding:5px 8px;border:1px solid #b28435;border-radius:6px;background:#f9e6b8;color:#64480f;font:700 12px/1.5 system-ui,sans-serif;white-space:nowrap}
+.fixed-stop-badge svg{width:15px;height:15px;flex:none}
+.stop-card-labels{display:flex;align-items:center;flex-wrap:wrap;gap:8px;min-width:0}
+.timeline-stop.is-fixed-stop>.stop-body{background:#fffcf4!important;border-top:4px solid #b28435!important}
+#board .mini-stop.is-fixed-stop{background:#fffcf4;border-top:4px solid #b28435}
+.mini-stop.is-fixed-stop>.fixed-stop-badge{justify-self:start;margin-bottom:7px}
+.mini-stop.is-fixed-stop>strong{display:block}
+.map-stop.is-fixed-stop{background:#fffcf4;border-top:3px solid #b28435}
+.map-stop .fixed-stop-badge{margin-bottom:6px}
+.card-tag-locked{cursor:default}
+.is-fixed-stop .timeline-fixed{padding:3px 6px;border:1px solid #b28435;border-radius:5px;background:#f9e6b8;color:#64480f;font-size:11px;font-weight:700}
+@media(max-width:600px){.fixed-stop-badge{font-size:11px;padding:4px 6px}.stop-card-labels{gap:6px}}
 #board.is-overview-reordering .mini-stop{cursor:grabbing}
 #board .overview-drop-target{outline:2px solid var(--green);outline-offset:3px;background:var(--tint,#edf3e9)}
 .mini-stop.reorder-source{opacity:.22}
