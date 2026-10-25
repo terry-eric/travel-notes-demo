@@ -773,7 +773,7 @@ document.addEventListener('click',e=>{
  if(action.hasAttribute('data-timeline-edit')){openTimelineTime(Number(action.dataset.timelineEdit));return;}
  if(action.hasAttribute('data-transport-edit')){if(!canChange()||stayDraft||editorDirty||importer.dirty||transportDirty&&transportDraft?.id!==action.dataset.transportId){notice('請先完成目前的編輯。');return;}timelineEditorId='';transportEditorId=action.dataset.transportId;setDay(activeDay,activeStop);inlineTransportForm(transportEditorId)?.elements.minutes.focus({preventScroll:true});return;}
  // Inline fields belong to their form; the surrounding card must not claim their clicks.
- if(e.target.closest('[data-stay-form],[data-transport-form]'))return;
+ if(e.target.closest('[data-stay-form],[data-transport-form]')&&!action.hasAttribute('data-transport'))return;
  if(e.target.closest('.timeline-rail')&&!action.hasAttribute('data-details')&&!action.hasAttribute('data-transport'))return;
  if(action.hasAttribute('data-open-day')){setDay(Number(action.dataset.openDay));showPage('daily');return;}
  if(action.hasAttribute('data-view-map')){if($('editor').open&&editorReadOnly)$('editor').close();selectStop(Number(action.dataset.viewMap));showPage('map');return;}
