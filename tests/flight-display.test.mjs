@@ -1,12 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import {flightLocalTimes,flightTripSchedule,flightTimezoneChange,previousFlightArrivalTimezone} from '../public/flights.js';
+import {flightLocalTimes,flightTripSchedule,flightTimezoneChange,previousFlightArrivalTimezone,flightDuration} from '../public/flights.js';
 const app=fs.readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
 const start=app.indexOf('function renderTimelineRail('),end=app.indexOf('\nfunction openTimelineTime(',start);
 assert.ok(start>=0&&end>start);
-const render=new Function('flightLocalTimes','formatDuration','clockMinutes','esc','access','timelineEditorId','activeDay','flightTimezoneChange','previousFlightArrivalTimezone','days',app.slice(start,end)+';return renderTimelineRail;')(
+const renderRail=new Function('flightLocalTimes','formatDuration','clockMinutes','esc','access','timelineEditorId','activeDay','flightTimezoneChange','previousFlightArrivalTimezone','days',app.slice(start,end)+';return renderTimelineRail;')(
  flightLocalTimes,n=>`${Math.floor(n/60)}h${n%60}m`,s=>/^\d{2}:\d{2}$/.test(s||'')?Number(s.slice(0,2))*60+Number(s.slice(3)):null,s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])),{canEdit:true},'',0,flightTimezoneChange,previousFlightArrivalTimezone,[]);
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const ticketStart=app.indexOf('function renderFlightZoneNotices('),ticketEnd=app.indexOf('\nfunction lockDayNames(',ticketStart);
+assert.ok(ticketStart>=0&&ticketEnd>ticketStart);
+const tickets=(history=[])=>new Function('flightLocalTimes','flightTimezoneChange','previousFlightArrivalTimezone','flightDuration','formatDuration','esc','days','activeDay',app.slice(ticketStart,ticketEnd)+';return {summary:flightCardSummary,notices:renderFlightZoneNotices};')(
+ flightLocalTimes,flightTimezoneChange,previousFlightArrivalTimezone,flightDuration,n=>`${Math.floor(n/60)}h${n%60}m`,esc,history,0);
+const ticket=tickets();
+const render=(item,index)=>renderRail(item,index)+(item.kind==='flight'?ticket.summary(item,ticket.notices(item,index)):'');
 const outbound={number:'SYNTHETIC',departureAirport:'TPE',arrivalAirport:'KIX',departureDateTime:'2026-12-26T07:40',arrivalDateTime:'2026-12-26T11:10',departureTimezone:'Asia/Taipei',arrivalTimezone:'Asia/Tokyo'};
 const stop=flight=>({id:'synthetic-flight',name:'合成航班',kind:'flight',flight,live:true,time:flightTripSchedule(flight,'Asia/Tokyo').time,duration:flightLocalTimes(flight).duration});
 test('reproduce07:40 ticket versus08:40 trip basis; display local endpoints without mutating schedule',()=>{
@@ -57,4 +64,29 @@ test('flight history crosses day pages but never invents zones for ordinary stop
 test('different timezone names with equal offsets still announce the region change',()=>{
  const t=flightLocalTimes({...outbound,departureTimezone:'Asia/Taipei',arrivalTimezone:'Asia/Singapore',arrivalDateTime:'2026-12-26T10:10'});
  const change=flightTimezoneChange(t.arrival,t.departure.timezone);assert.equal(change.deltaMinutes,0);assert.match(change.message,/時差相同/);
+});
+
+test('narrow flight rail keeps two readable clocks and fixed state, without long duplicate context',()=>{
+ const item=stop(outbound),before=JSON.stringify(item),html=renderRail(item,0);
+ assert.match(html,/aria-label="起飛 07:40"/);assert.match(html,/aria-label="抵達 11:10"/);assert.match(html,/固定時間/);
+ assert.equal((html.match(/<time /g)||[]).length,2);
+ assert.doesNotMatch(html,/timeline-zone-transition|data-flight-zone-|UTC|標準時間|2026\/12|飛行|當地/);
+ assert.equal(JSON.stringify(item),before);
+});
+test('timezone notices use full ticket content while both endpoint dates and local zones remain visible',()=>{
+ const item=stop(outbound),html=ticket.summary(item,ticket.notices(item,0));
+ assert.match(html,/^<div class="flight-ticket"><div class="flight-zone-notices"/);
+ assert.equal((html.match(/data-flight-zone-initial/g)||[]).length,1);assert.equal((html.match(/data-flight-zone-change/g)||[]).length,1);
+ assert.match(html,/UTC\+08:00/);assert.match(html,/抵達後 · 時區變更：[\s\S]*UTC\+09:00/);
+ assert.equal((html.match(/2026\/12\/26/g)||[]).length,2);
+ assert.match(html,/Asia\/Taipei 當地時間/);assert.match(html,/Asia\/Tokyo 當地時間/);assert.match(html,/2h30m/);
+});
+test('moving notices does not add repeated transitions on a later day or infer an ordinary stop zone',()=>{
+ const back={...outbound,departureTimezone:'Asia/Tokyo',arrivalTimezone:'Asia/Taipei',departureDateTime:'2026-12-27T18:00',arrivalDateTime:'2026-12-27T19:30'};
+ const history=[{stops:[stop(outbound)]},{stops:[{id:'ordinary',time:'17:00'},stop(back)]}],before=JSON.stringify(history),t=tickets(history);
+ const html=t.notices(history[1].stops[1],1,1);assert.doesNotMatch(html,/data-flight-zone-initial/);assert.equal((html.match(/data-flight-zone-change/g)||[]).length,1);assert.match(html,/慢1小時/);
+ assert.equal(t.notices(history[1].stops[0],0,1),'');assert.equal(JSON.stringify(history),before);
+});
+test('ticket detail without timeline context retains the full original ticket and no duplicated notices',()=>{
+ const html=ticket.summary(stop(outbound));assert.doesNotMatch(html,/flight-zone-notice/);assert.match(html,/07:40/);assert.match(html,/11:10/);assert.match(html,/TPE/);assert.match(html,/KIX/);
 });

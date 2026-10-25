@@ -427,8 +427,8 @@ function renderTimelineRail(stop,index){
  if(flight){
   try{
    const times=flightLocalTimes(stop.flight);
-   const endpoint=(point,label,primary,previousZone)=>{const change=flightTimezoneChange(point,previousZone);return (change?`<span class="timeline-zone-transition" data-flight-zone-${change.kind} role="note">${esc(change.message)}</span>`:'')+`<time class="${primary?'timeline-start':'timeline-departure'}" datetime="${esc(point.local)}">${label} ${esc(point.time)}</time><span class="timeline-stay">${esc(point.date.replaceAll('-','/'))}</span><span class="timeline-stay">${esc(point.zoneLabel)}<br>${esc(point.offsetLabel)} · 當地</span>`;};
-   display=endpoint(times.departure,'起飛',true,previousFlightArrivalTimezone(days,activeDay,index))+`<span class="timeline-stay">飛行 ${esc(formatDuration(times.duration))}</span>`+endpoint(times.arrival,'抵達',false,times.departure.timezone)+(stop.live?'<span class="timeline-fixed">固定時間</span>':'');
+   const endpoint=(point,label,primary)=>`<time class="${primary?'timeline-start':'timeline-departure'} timeline-flight-endpoint" datetime="${esc(point.local)}" aria-label="${label} ${esc(point.time)}"><span class="timeline-flight-label">${label}</span><span class="timeline-flight-clock">${esc(point.time)}</span></time>`;
+   display=endpoint(times.departure,'起飛',true)+endpoint(times.arrival,'抵達',false)+(stop.live?'<span class="timeline-fixed">固定時間</span>':'');
   }catch{display='<span class="timeline-stay">航班時間待確認</span>';}
  }
  if(!access.canEdit)return `<div class="timeline-rail"><div class="timeline-clock">${display}</div></div>`;
@@ -478,7 +478,7 @@ function setDay(index,stop=0){
  const d=days[index];
  renderDateTabs('day-tabs','tab','day-panel');
  $('day-intro').innerHTML=`<div class="day-edit-heading">${renderDayName(d,index,{canEdit:access.canEdit}).replaceAll("day-name-"+index,"daily-day-name-"+index)}<button class="primary" data-add="${index}" data-write>＋ 新增行程</button></div><p>${esc(d.intro||'')}</p><p class="timeline-zone-context">一般行程沿用旅行時區：${esc(currentTrip?.timezone||'未確認')}。航班顯示起飛／抵達地當地時間。</p>`;
- $('timeline').innerHTML=d.stops.map((s,j)=>`${renderTransportRow(d.stops,j)}<article class="stop timeline-stop ${isFixedStop(s)?'is-fixed-stop ':''}${s.live===true?'has-stop-avatar ':''}${s.kind==='flight'?'stop-flight ':''}category-${tagCategory(cardTagValue(s))} ${j===activeStop?'selected':''}" id="stop-${j}" data-stop-id="${esc(s.id)}" data-reorder-card data-details="${j}" data-owner="${index}" role="button" tabindex="0" aria-label="${esc([s.name,isFixedStop(s)?'固定行程':'',stopAvatarLabel(s)].filter(Boolean).join('，'))}" aria-describedby="reorder-hint">${renderTimelineRail(s,j)}<div class="stop-body"><div class="stop-card-head"><div class="stop-card-labels">${renderFixedStopBadge(s)}${cardTag(s,index)}</div>${renderStopAvatar(s)}</div><h3 class="stop-name">${esc(s.name)}</h3>${s.desc?`<p class="stop-description">${esc(s.desc).replace(/\n/g,'<br>')}</p>`:''}${s.kind==='flight'?flightCardSummary(s):''}</div></article>`).join('')||'<div class="empty-day"><h3>把喜歡的地方，加進今天。</h3><p>這一天還沒有行程。</p><button class="primary" data-add="'+index+'" data-write>＋ 新增第一個行程</button></div>';
+ $('timeline').innerHTML=d.stops.map((s,j)=>`${renderTransportRow(d.stops,j)}<article class="stop timeline-stop ${isFixedStop(s)?'is-fixed-stop ':''}${s.live===true?'has-stop-avatar ':''}${s.kind==='flight'?'stop-flight ':''}category-${tagCategory(cardTagValue(s))} ${j===activeStop?'selected':''}" id="stop-${j}" data-stop-id="${esc(s.id)}" data-reorder-card data-details="${j}" data-owner="${index}" role="button" tabindex="0" aria-label="${esc([s.name,isFixedStop(s)?'固定行程':'',stopAvatarLabel(s)].filter(Boolean).join('，'))}" aria-describedby="reorder-hint">${renderTimelineRail(s,j)}<div class="stop-body"><div class="stop-card-head"><div class="stop-card-labels">${renderFixedStopBadge(s)}${cardTag(s,index)}</div>${renderStopAvatar(s)}</div><h3 class="stop-name">${esc(s.name)}</h3>${s.desc?`<p class="stop-description">${esc(s.desc).replace(/\n/g,'<br>')}</p>`:''}${s.kind==='flight'?flightCardSummary(s,renderFlightZoneNotices(s,j,index)):''}</div></article>`).join('')||'<div class="empty-day"><h3>把喜歡的地方，加進今天。</h3><p>這一天還沒有行程。</p><button class="primary" data-add="'+index+'" data-write>＋ 新增第一個行程</button></div>';
  $('reorder-hint').hidden=!access.canEdit;$('map-details').dataset.details=activeStop;$('map-details').dataset.owner=index;
  $('day-tip').textContent=d.tip;$('toolbar-add').dataset.add=index;renderMapStops();selectStop(activeStop);restoreStayInputs();lock();
 }
@@ -1047,10 +1047,19 @@ function updateFlightEditor(){
  $('field-time').closest('label').hidden=flight;$('field-duration').closest('.duration-field').hidden=flight;$('field-fixed').closest('label').hidden=flight;$('field-tag').closest('.tag-field').hidden=true;if(!flight)syncEditorTypeTag();
  if(flight)$('field-fixed').checked=true;
 }
-function flightCardSummary(stop){
+function renderFlightZoneNotices(stop,index,day=activeDay){
+ if(stop.kind!=='flight')return '';
+ try{
+  const times=flightLocalTimes(stop.flight),previous=previousFlightArrivalTimezone(days,day,index);
+  const endpoints=[[times.departure,previous,'起飛前'],[times.arrival,times.departure.timezone,'抵達後']];
+  const notes=endpoints.map(([point,zone,label])=>{const change=flightTimezoneChange(point,zone);return change?`<p class="flight-zone-notice" data-flight-zone-${change.kind} role="note">${change.kind==='initial'?'':label+' · '}${esc(change.message)}</p>`:'';}).filter(Boolean).join('');
+  return notes?`<div class="flight-zone-notices" aria-label="航班時區提示">${notes}</div>`:'';
+ }catch{return '';}
+}
+function flightCardSummary(stop,notices=''){
  const f=stop.flight;if(!f)return '';let duration='';try{duration=formatDuration(flightDuration(f));}catch{}
  const endpoint=(date,zone,airport)=>`<div class="flight-ticket-end"><span class="flight-ticket-date">${esc(date.slice(0,10).replaceAll('-','/'))}</span><time class="flight-ticket-time">${esc(date.slice(11))}</time><span class="flight-ticket-airport">${esc(airport)}</span><span class="flight-ticket-zone">${esc(zone)} 當地時間</span></div>`;
- return `<div class="flight-ticket"><div class="flight-ticket-heading">✈ ${esc([f.airline,f.number].filter(Boolean).join(' · ')||'機票')}</div><div class="flight-ticket-route">${endpoint(f.departureDateTime,f.departureTimezone,f.departureAirport)}<div class="flight-ticket-duration"><span>${esc(duration)}</span><span class="flight-ticket-arrow" aria-hidden="true"></span></div>${endpoint(f.arrivalDateTime,f.arrivalTimezone,f.arrivalAirport)}</div></div>`;
+ return `<div class="flight-ticket">${notices}<div class="flight-ticket-heading">✈ ${esc([f.airline,f.number].filter(Boolean).join(' · ')||'機票')}</div><div class="flight-ticket-route">${endpoint(f.departureDateTime,f.departureTimezone,f.departureAirport)}<div class="flight-ticket-duration"><span>${esc(duration)}</span><span class="flight-ticket-arrow" aria-hidden="true"></span></div>${endpoint(f.arrivalDateTime,f.arrivalTimezone,f.arrivalAirport)}</div></div>`;
 }
 function lockDayNames(){
  for(const form of document.querySelectorAll('[data-day-name-form]')){const blocked=!access.canEdit||!ready||busy||!!pending||conflict||!!recovery||!!tagDraft||transportDirty||editorDirty||!!stayDraft||importer.dirty||dayNameDraft&&Number(form.dataset.dayIndex)!==dayNameDraft.day;for(const field of form.querySelectorAll('input,button'))field.disabled=!!blocked;form.querySelector('[data-day-name-cancel]').hidden=!(dayNameDraft&&Number(form.dataset.dayIndex)===dayNameDraft.day);}
