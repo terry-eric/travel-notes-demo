@@ -61,3 +61,5 @@ body:not(.read-only) #board .mini-stop[data-overview-stop-id]{cursor:grab}
 @media(max-width:600px){.timeline-rail.is-editing>.timeline-time-form{grid-template-columns:minmax(0,1fr);padding:10px;gap:8px}.timeline-rail.is-editing .timeline-time-actions{grid-column:1}.timeline-time-feedback,.timeline-original-time{grid-column:1}.timeline-rail.is-editing input{font-size:16px}}
 @media(prefers-reduced-motion:reduce){.timeline-time-form,.inline-transfer-form{animation:none}}
 @media print{.timeline-time-form{display:none}.timeline-clock{padding:8px 2px;background:none!important}.timeline-stop>.stop-body{box-shadow:none!important}}
+
+.timeline-zone-transition{display:block;align-self:stretch;padding:6px;border-radius:6px;background:#edf3e9;color:#284c3b;font-size:12px;line-height:1.5;overflow-wrap:anywhere}.timeline-zone-context{font-size:13px;line-height:1.6;overflow-wrap:anywhere;color:#506d5b}

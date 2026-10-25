@@ -6,7 +6,7 @@ import {mountRouteMap} from './route-map.js';
 import {getStopCoordinates,normalizeCoordinates} from './map-coordinates.js';
 import {knownStopPoint,geocodeStopKey} from './auto-geolocation.js';
 import {createGeolocationClient,geolocationStatusText} from './geolocation-client.js';
-import {sanitizeFlight,flightTripSchedule,formatFlightSummary,flightFieldsHtml,flightDuration} from './flights.js';
+import {sanitizeFlight,flightTripSchedule,formatFlightSummary,flightFieldsHtml,flightDuration,flightLocalTimes,flightTimezoneChange,previousFlightArrivalTimezone} from './flights.js';
 import {renderDayName,renameDay} from './day-names.js';
 import {readRoute,routeUrl,boundedSelection} from './routes.js';
 import {routeLocation,routeLeg,directionsUrl,savedTravelMinutes,clearStaleTravel,pushSchedule,clockMinutes} from './transport.js';
@@ -19,7 +19,7 @@ import {createDraftStore,withoutDeletedStops,sanitizePermanentDraft} from './dra
 import {initConflicts} from './conflicts.js';
 import {createMapFrame,placeEmbedUrl} from './map-frame.js';
 import {durationParts,durationMinutes,formatDuration} from './duration.js';
-import {tagCategory,tagOptions,renderCardTag,applyStopTag,isFixedStop,renderFixedStopBadge} from './tags.js';
+import {tagCategory,tagOptions,renderCardTag,applyStopTag,isFixedStop,renderFixedStopBadge,itineraryTypeOptions,itineraryTypeValue,resolveItineraryType} from './tags.js';
 import {renderStopAvatar,stopAvatarLabel} from './stop-avatar.js';
 import {initReorder,initOverviewReorder,moveStop,moveStopBetweenDays} from './reorder.js';
 import {initImport,insertImported} from './import.js';
@@ -300,7 +300,7 @@ function bindDraftStore(){
  }
  if(recovery&&recovery.tripId!==tripId)recovery=null;$('draft-recovery').hidden=!recovery;
 }
-function editorFields(){return Object.fromEntries(['name','time','day','order','tag','q','mode','mapUrl','desc','kind','coordinates'].map(key=>[key,$('field-'+key).value]).concat([['flight',readFlightFields()],['fixed',$('field-fixed').checked],['hours',$('editor-form').elements.durationHours?.value??''],['minutes',$('editor-form').elements.durationMinutes?.value??'0']]));}
+function editorFields(){return Object.fromEntries(['name','time','day','order','tag','q','mode','mapUrl','desc','kind','coordinates'].map(key=>[key,$('field-'+key).value]).concat([['placeTypeFields',editorPlaceTypeFields?{...editorPlaceTypeFields}:null],['flight',readFlightFields()],['fixed',$('field-fixed').checked],['hours',$('editor-form').elements.durationHours?.value??''],['minutes',$('editor-form').elements.durationMinutes?.value??'0']]));}
 function currentDraft(){
  const editor=editorDirty&&editorScope?{scope:editorScope,editing,newStopId,fields:editorFields()}:null;
  const transport=transportDirty&&transportScope&&transportDraft?{scope:transportScope,...transportDraft}:null;
@@ -423,7 +423,14 @@ function renderTimelineRail(stop,index){
  const stay=(flight?'飛行 ':'停留 ')+formatDuration(stop.duration);
  const start=clockMinutes(stop.time),departure=start!==null&&Number.isInteger(stop.duration)?start+stop.duration:null;
  const end=departure===null?'':String(Math.floor(departure%1440/60)).padStart(2,'0')+':'+String(departure%60).padStart(2,'0');
- const display=`<time class="timeline-start">${esc(clock)}</time><span class="timeline-stay">${esc(stay)}</span>${end?`<span class="timeline-departure">${flight?'抵達':'離開'} ${end}${departure>=1440?' +1天':''}</span>`:''}${stop.live?'<span class="timeline-fixed">固定時間</span>':''}`;
+ let display=`<time class="timeline-start">${esc(clock)}</time><span class="timeline-stay">${esc(stay)}</span>${end?`<span class="timeline-departure">${flight?'抵達':'離開'} ${end}${departure>=1440?' +1天':''}</span>`:''}${stop.live?'<span class="timeline-fixed">固定時間</span>':''}`;
+ if(flight){
+  try{
+   const times=flightLocalTimes(stop.flight);
+   const endpoint=(point,label,primary,previousZone)=>{const change=flightTimezoneChange(point,previousZone);return (change?`<span class="timeline-zone-transition" data-flight-zone-${change.kind} role="note">${esc(change.message)}</span>`:'')+`<time class="${primary?'timeline-start':'timeline-departure'}" datetime="${esc(point.local)}">${label} ${esc(point.time)}</time><span class="timeline-stay">${esc(point.date.replaceAll('-','/'))}</span><span class="timeline-stay">${esc(point.zoneLabel)}<br>${esc(point.offsetLabel)} · 當地</span>`;};
+   display=endpoint(times.departure,'起飛',true,previousFlightArrivalTimezone(days,activeDay,index))+`<span class="timeline-stay">飛行 ${esc(formatDuration(times.duration))}</span>`+endpoint(times.arrival,'抵達',false,times.departure.timezone)+(stop.live?'<span class="timeline-fixed">固定時間</span>':'');
+  }catch{display='<span class="timeline-stay">航班時間待確認</span>';}
+ }
  if(!access.canEdit)return `<div class="timeline-rail"><div class="timeline-clock">${display}</div></div>`;
  const button=flight?`<button type="button" class="timeline-clock" data-details="${index}" data-owner="${activeDay}" aria-label="${esc(stop.name)}：修改機票時間">${display}</button>`:`<button type="button" class="timeline-clock" data-timeline-edit="${index}" data-write aria-expanded="${active}" aria-label="${esc(stop.name)}：點擊修改開始與停留時間">${display}</button>`;
  if(!active||flight)return `<div class="timeline-rail">${button}</div>`;
@@ -470,7 +477,7 @@ function setDay(index,stop=0){
  if(!days.length){$('day-tabs').innerHTML='';$('day-intro').innerHTML='<p>先從「我的旅行」建立或選擇一趟旅行。</p>';$('timeline').innerHTML='';renderMapStops();selectStop(activeStop);lock();return;}
  const d=days[index];
  renderDateTabs('day-tabs','tab','day-panel');
- $('day-intro').innerHTML=`<div class="day-edit-heading">${renderDayName(d,index,{canEdit:access.canEdit}).replaceAll("day-name-"+index,"daily-day-name-"+index)}<button class="primary" data-add="${index}" data-write>＋ 新增行程</button></div><p>${esc(d.intro||'')}</p>`;
+ $('day-intro').innerHTML=`<div class="day-edit-heading">${renderDayName(d,index,{canEdit:access.canEdit}).replaceAll("day-name-"+index,"daily-day-name-"+index)}<button class="primary" data-add="${index}" data-write>＋ 新增行程</button></div><p>${esc(d.intro||'')}</p><p class="timeline-zone-context">一般行程沿用旅行時區：${esc(currentTrip?.timezone||'未確認')}。航班顯示起飛／抵達地當地時間。</p>`;
  $('timeline').innerHTML=d.stops.map((s,j)=>`${renderTransportRow(d.stops,j)}<article class="stop timeline-stop ${isFixedStop(s)?'is-fixed-stop ':''}${s.live===true?'has-stop-avatar ':''}${s.kind==='flight'?'stop-flight ':''}category-${tagCategory(cardTagValue(s))} ${j===activeStop?'selected':''}" id="stop-${j}" data-stop-id="${esc(s.id)}" data-reorder-card data-details="${j}" data-owner="${index}" role="button" tabindex="0" aria-label="${esc([s.name,isFixedStop(s)?'固定行程':'',stopAvatarLabel(s)].filter(Boolean).join('，'))}" aria-describedby="reorder-hint">${renderTimelineRail(s,j)}<div class="stop-body"><div class="stop-card-head"><div class="stop-card-labels">${renderFixedStopBadge(s)}${cardTag(s,index)}</div>${renderStopAvatar(s)}</div><h3 class="stop-name">${esc(s.name)}</h3>${s.desc?`<p class="stop-description">${esc(s.desc).replace(/\n/g,'<br>')}</p>`:''}${s.kind==='flight'?flightCardSummary(s):''}</div></article>`).join('')||'<div class="empty-day"><h3>把喜歡的地方，加進今天。</h3><p>這一天還沒有行程。</p><button class="primary" data-add="'+index+'" data-write>＋ 新增第一個行程</button></div>';
  $('reorder-hint').hidden=!access.canEdit;$('map-details').dataset.details=activeStop;$('map-details').dataset.owner=index;
  $('day-tip').textContent=d.tip;$('toolbar-add').dataset.add=index;renderMapStops();selectStop(activeStop);restoreStayInputs();lock();
@@ -644,13 +651,29 @@ async function commit(next,message,day=activeDay,stop=activeStop,retry=false,tra
  }
  finally{if(epoch===identityEpoch){busy=false;lock();}}
 }
+function restorePlaceTypeFields(raw){
+ if(!raw||typeof raw!=='object'||Array.isArray(raw))return null;
+ const limits={coordinates:100,mapUrl:2048,q:300};
+ if(Object.entries(limits).some(([key,limit])=>typeof raw[key]!=='string'||raw[key].length>limit))return null;
+ return Object.fromEntries(Object.keys(limits).map(key=>[key,raw[key]]));
+}
+let editorPlaceTypeFields=null;
+function populateEditorType(stop={},selection=null){
+ const options=itineraryTypeOptions([stop.tag,...days.flatMap(day=>day.stops.map(item=>item.tag))]);
+ const field=$('field-kind');field.innerHTML=options.map(option=>`<option value="${esc(option.value)}">${esc(option.label)}</option>`).join('');
+ const value=selection||itineraryTypeValue(stop);field.value=options.some(option=>option.value===value)?value:'place';field.dataset.previousKind=field.value==='flight'?'flight':'place';
+}
+function syncEditorTypeTag(){
+ const result=resolveItineraryType($('field-kind').value,$('field-tag').value);
+ if(result.kind==='place'){$('field-tag').innerHTML=tagOptions(result.tag).map(value=>`<option value="${esc(value)}">${esc(value)}</option>`).join('');$('field-tag').value=result.tag;updateTagPreview();}
+}
 function openEditor(day,index=null,scope=null,view=false){
  if(tagDraft&&!restoringDraft){notice('標籤尚未儲存，請先重試儲存。');return;}
  if(!view&&transportDirty){notice('請先儲存或取消卡片之間的交通時間。');return;}
  if(stayDraft&&!restoringDraft){notice('請先完成或取消時間編輯。');return;}
  if(!transportDirty){transportEditorId='';timelineEditorId='';}
  if(!ready||busy||pending||conflict||(!view&&!canChange()))return;editorReadOnly=view;editorScope=scope||scopeSnapshot();editorDirty=false;newStopId=crypto.randomUUID();editing=index===null?null:{day,index,id:editorScope.days[day].stops[index].id};const s=index===null?{}:editorScope.days[day].stops[index];
- $('editor-form').reset();$('field-kind').value=s.kind==='flight'?'flight':'place';$('field-coordinates').value=pointText(knownStopPoint(s,geolocation.overlay().flatMap(item=>item.stops)));initFlightFields(s.flight,day);$('field-name').setCustomValidity('');$('editor-title').textContent=view?'行程詳情':index===null?'新增行程':'編輯行程';$('field-day').innerHTML=days.map((d,i)=>`<option value="${i}">${esc(d.isoDate||d.date)} ${esc(d.week)}</option>`).join('');$('field-day').value=day;
+ $('editor-form').reset();editorPlaceTypeFields=null;populateEditorType(s);$('field-coordinates').value=pointText(knownStopPoint(s,geolocation.overlay().flatMap(item=>item.stops)));initFlightFields(s.flight,day);$('field-name').setCustomValidity('');$('editor-title').textContent=view?'行程詳情':index===null?'新增行程':'編輯行程';$('field-day').innerHTML=days.map((d,i)=>`<option value="${i}">${esc(d.isoDate||d.date)} ${esc(d.week)}</option>`).join('');$('field-day').value=day;
  $('field-tag').innerHTML=tagOptions(s.tag).map(value=>`<option value="${esc(value)}">${esc(value)}</option>`).join('');
  for(const key of ['name','time','desc','mapUrl'])$('field-'+key).value=s[key]??'';$('field-fixed').checked=s.live===true;$('field-q').value=s.routeQuery||s.q||routeLocation(s,days[day].stops,resolvedPlaces);$('field-tag').value=s.tag||'其他';updateTagPreview();$('field-duration').innerHTML=durationPicker(s.duration,'行程','field-duration');$('field-mode').value=s.mode||'walking';$('form-error').textContent='';updateSharePreview();updateEditorOrder(true);renderEditorSummary(day,index,s);$('editor-location').open=index===null;$('editor').showModal();lock();$(view?(access.canEdit?'editor-start-edit':'editor-close'):index===null?'field-q':'field-name').focus();
  renderEditorGeolocation();
@@ -749,14 +772,16 @@ document.addEventListener('click',e=>{
  if(action.hasAttribute('data-timeline-cancel')){discardTimelineTime();return;}
  if(action.hasAttribute('data-timeline-edit')){openTimelineTime(Number(action.dataset.timelineEdit));return;}
  if(action.hasAttribute('data-transport-edit')){if(!canChange()||stayDraft||editorDirty||importer.dirty||transportDirty&&transportDraft?.id!==action.dataset.transportId){notice('請先完成目前的編輯。');return;}timelineEditorId='';transportEditorId=action.dataset.transportId;setDay(activeDay,activeStop);inlineTransportForm(transportEditorId)?.elements.minutes.focus({preventScroll:true});return;}
- if((e.target.closest('[data-stay-form],[data-transport-form]')||e.target.closest('.timeline-rail'))&&!action.hasAttribute('data-details')&&!action.hasAttribute('data-transport'))return;
+ // Inline fields belong to their form; the surrounding card must not claim their clicks.
+ if(e.target.closest('[data-stay-form],[data-transport-form]'))return;
+ if(e.target.closest('.timeline-rail')&&!action.hasAttribute('data-details')&&!action.hasAttribute('data-transport'))return;
  if(action.hasAttribute('data-open-day')){setDay(Number(action.dataset.openDay));showPage('daily');return;}
  if(action.hasAttribute('data-view-map')){if($('editor').open&&editorReadOnly)$('editor').close();selectStop(Number(action.dataset.viewMap));showPage('map');return;}
  if(action.hasAttribute('data-transport')){openTransport(Number(action.dataset.transport));return;}
  if(action.hasAttribute('data-map-stop')){if(dayNameDraft||transportDirty)return;setDay(Number(action.dataset.mapDay),Number(action.dataset.mapStop));return;}
  if(action.hasAttribute('data-close')){if(!pending&&!conflict){editing=null;editorDirty=false;editorScope=null;persistDraft();}$('editor').close();return;}
  if(action.hasAttribute('data-details')){const day=Number(action.dataset.owner),index=Number(action.dataset.details);setDay(day,index);openEditor(day,index,null,true);return;}
- if(action.id==='flight-add'){if(!canChange()||$('editor').open)return;openEditor(activeDay);if($('editor').open){$('field-kind').value='flight';updateFlightEditor();$('field-name').value='航班';$('editor-title').textContent='新增班機';$('editor-flight-fields').querySelector('input').focus();}return;}
+ if(action.id==='flight-add'){if(!canChange()||$('editor').open)return;openEditor(activeDay);if($('editor').open){$('field-kind').value='flight';$('field-kind').dataset.previousKind='flight';updateFlightEditor();$('field-name').value='航班';$('editor-title').textContent='新增班機';$('editor-flight-fields').querySelector('input').focus();}return;}
  if(action.hasAttribute('data-add')){openEditor(Number(action.dataset.add));return;}
  if(action.hasAttribute('data-edit')){openEditor(Number(action.dataset.owner),Number(action.dataset.edit));return;}
  if(action.hasAttribute('data-remove')){void remove(Number(action.dataset.owner),Number(action.dataset.remove));return;}
@@ -798,7 +823,7 @@ $('editor-form').addEventListener('submit',async e=>{
  const requestedCoordinates=coordinateParts.length===2?normalizeCoordinates({lat:coordinateParts[0],lng:coordinateParts[1]}):null;
  if(coordinateText&&!requestedCoordinates){$('form-error').textContent='座標請使用有效的「緯度, 經度」。';return;}
  try{const link=parseMapsShare($('field-mapUrl').value);if(!editing&&!link&&!$('field-q').value.trim()&&!requestedCoordinates&&$('field-kind').value!=='flight')throw Error('請填寫實際要去的地點／地址、地點座標，或 Google Maps 分享連結。');delete stop.mapUrl;delete stop.placeId;if(link)stop.mapUrl=link;}catch(error){$('field-mapUrl').setCustomValidity(error.message);$('field-mapUrl').reportValidity();return;}
- for(const key of ['name','time','tag','q','desc','mode'])stop[key]=$('field-'+key).value.trim();if(!stop.name){$('field-name').setCustomValidity('請填寫行程名稱');$('field-name').reportValidity();return;}
+ syncEditorTypeTag();for(const key of ['name','time','tag','q','desc','mode'])stop[key]=$('field-'+key).value.trim();if(!stop.name){$('field-name').setCustomValidity('請填寫行程名稱');$('field-name').reportValidity();return;}
  if($('field-fixed').checked)stop.live=true;else delete stop.live;
  delete stop.coordinates;
  if(requestedCoordinates)stop.coordinates=requestedCoordinates;
@@ -992,7 +1017,7 @@ $('draft-restore').addEventListener('click',()=>{
    for(const key of ['name','time','day','q','mode','mapUrl','desc'])$('field-'+key).value=draft.fields[key]??'';
    if(draft.fields.fixed!==undefined)$('field-fixed').checked=!!draft.fields.fixed;
    $('field-tag').innerHTML=tagOptions(draft.fields.tag).map(value=>`<option value="${esc(value)}">${esc(value)}</option>`).join('');$('field-tag').value=draft.fields.tag;
-   $('editor-form').elements.durationHours.value=draft.fields.hours;$('editor-form').elements.durationMinutes.value=draft.fields.minutes;editorDirty=true;updateEditorOrder(true);if(draft.fields.order!==undefined){$('field-order').value=draft.fields.order;updateEditorOrder();}updateTagPreview();updateSharePreview();$('field-kind').value=draft.fields.kind||'place';$('field-coordinates').value=draft.fields.coordinates||'';initFlightFields(draft.fields.flight||{},Number(draft.fields.day));updateFlightEditor();
+   $('editor-form').elements.durationHours.value=draft.fields.hours;$('editor-form').elements.durationMinutes.value=draft.fields.minutes;editorDirty=true;updateEditorOrder(true);if(draft.fields.order!==undefined){$('field-order').value=draft.fields.order;updateEditorOrder();}updateTagPreview();updateSharePreview();populateEditorType({kind:draft.fields.kind==='flight'?'flight':'place',tag:draft.fields.tag},draft.fields.kind||'place');editorPlaceTypeFields=restorePlaceTypeFields(draft.fields.placeTypeFields);$('field-coordinates').value=draft.fields.coordinates||'';initFlightFields(draft.fields.flight||{},Number(draft.fields.day));updateFlightEditor();
   }else if(saved.imported){importer.restore(saved.imported);
   }else if(saved.transport){
    const draft=saved.transport;days=clone(draft.scope.days);revision=draft.scope.revision;const index=days[draft.day].stops.findIndex(s=>s.id===draft.id);if(index<0)throw Error('找不到草稿中的行程。');transportScope=draft.scope;transportDraft={day:draft.day,id:draft.id,mode:draft.mode,minutes:String(draft.minutes??'')};transportDirty=true;refresh(draft.day,index);showPage('daily');inlineTransportForm()?.elements.minutes.focus({preventScroll:true});
@@ -1019,7 +1044,7 @@ function updateFlightEditor(){
  for(const field of $('editor-flight-fields').querySelectorAll('input,select,textarea'))field.disabled=!flight||locked;
  for(const id of ['field-time','field-fixed','field-q'])$(id).disabled=locked||flight;
  for(const field of $('field-duration').querySelectorAll('select'))field.disabled=locked||flight;
- $('field-time').closest('label').hidden=flight;$('field-duration').closest('.duration-field').hidden=flight;$('field-fixed').closest('label').hidden=flight;$('field-tag').closest('.tag-field').hidden=flight||!$('field-fixed').checked;
+ $('field-time').closest('label').hidden=flight;$('field-duration').closest('.duration-field').hidden=flight;$('field-fixed').closest('label').hidden=flight;$('field-tag').closest('.tag-field').hidden=true;if(!flight)syncEditorTypeTag();
  if(flight)$('field-fixed').checked=true;
 }
 function flightCardSummary(stop){
@@ -1047,7 +1072,12 @@ document.addEventListener('focusout',event=>{if(event.target.name!=='dayName')re
 document.addEventListener('pointerdown',event=>{const field=document.activeElement;if(!dayNameDraft||field?.name!=='dayName')return;const form=field.closest('[data-day-name-form]');if(form&&!form.contains(event.target))void saveDayName(form);},true);
 document.addEventListener('keydown',event=>{if(event.key!=='Escape'||event.target.name!=='dayName')return;event.preventDefault();cancelDayName(event.target.closest('[data-day-name-form]'));});
 $('field-fixed').addEventListener('change',updateFlightEditor);
-$('field-kind').addEventListener('change',()=>{updateFlightEditor();$('field-coordinates').value='';$('field-mapUrl').value='';if($('field-kind').value==='flight'){$('field-q').value=readFlightFields().departureAirport||'';if(!$('field-name').value)$('field-name').value='航班';}editorDirty=true;persistDraft();});
+$('field-kind').addEventListener('change',()=>{
+ const field=$('field-kind'),flight=field.value==='flight',wasFlight=field.dataset.previousKind==='flight';
+ if(flight&&!wasFlight){editorPlaceTypeFields=Object.fromEntries(['coordinates','mapUrl','q'].map(key=>[key,$('field-'+key).value]));$('field-coordinates').value='';$('field-mapUrl').value='';$('field-q').value=readFlightFields().departureAirport||'';if(!$('field-name').value)$('field-name').value='航班';}
+ if(!flight&&wasFlight&&editorPlaceTypeFields){for(const [key,value] of Object.entries(editorPlaceTypeFields))$('field-'+key).value=value;editorPlaceTypeFields=null;}
+ field.dataset.previousKind=flight?'flight':'place';updateFlightEditor();editorDirty=true;persistDraft();renderEditorGeolocation();
+});
 $('editor-flight-fields').addEventListener('input',event=>{if(event.target.name==='flight.departureAirport'){$('field-q').value=event.target.value;$('field-coordinates').value='';$('field-mapUrl').value='';persistDraft();}});
 $('field-q').addEventListener('input',()=>{$('field-coordinates').value='';if(editing&&$('field-mapUrl').value===editorScope.days[editing.day].stops[editing.index].mapUrl)$('field-mapUrl').value='';persistDraft();renderEditorGeolocation();});
 $('field-mapUrl').addEventListener('input',()=>{let mapUrl='';try{mapUrl=parseMapsShare($('field-mapUrl').value);}catch{}$('field-coordinates').value=pointText(knownStopPoint({mapUrl},geolocation.overlay().flatMap(day=>day.stops)));persistDraft();renderEditorGeolocation();});

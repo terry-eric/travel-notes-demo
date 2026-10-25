@@ -149,6 +149,52 @@ export function flightTripSchedule(raw, tripTimezone) {
  };
 }
 
+/** Ticket-local display only; never changes trip-timezone schedule placement. */
+export function flightLocalTimes(raw) {
+ const flight = sanitizeFlight(raw);
+ const point = (local, zone, field) => {
+  const instant = flightInstant(local, zone, field);
+  const offsetMinutes = Math.round((utcDate(zonedParts(instant, zone)).getTime() - instant) / MINUTE);
+  const amount = Math.abs(offsetMinutes), pad = value => String(value).padStart(2, '0');
+  const offsetLabel = 'UTC' + (offsetMinutes < 0 ? '-' : '+') + pad(Math.floor(amount / 60)) + ':' + pad(amount % 60);
+  const zoneLabel = new Intl.DateTimeFormat('zh-TW', { timeZone: zone, timeZoneName: 'long' }).formatToParts(instant).find(part => part.type === 'timeZoneName').value;
+  return { local, date: local.slice(0, 10), time: local.slice(11), timezone: zone, offsetMinutes, offsetLabel, zoneLabel };
+ };
+ return { departure: point(flight.departureDateTime, flight.departureTimezone, 'departureDateTime'), arrival: point(flight.arrivalDateTime, flight.arrivalTimezone, 'arrivalDateTime'), duration: validatedDuration(flight) };
+}
+
+/** Only explicit flight endpoints establish a flight timezone; ordinary stops never do. */
+export function previousFlightArrivalTimezone(days, dayIndex, stopIndex) {
+ let zone = null;
+ for (let d = 0; d <= dayIndex; d++) {
+  const stops = days[d]?.stops || [];
+  for (let s = 0; s < (d === dayIndex ? stopIndex : stops.length); s++) {
+   if (stops[s]?.kind !== 'flight') continue;
+   try { zone = sanitizeFlight(stops[s].flight).arrivalTimezone; } catch { zone = null; }
+  }
+ }
+ return zone;
+}
+
+/** Compare offsets at the transition event instant, not today's offset or departure offset. */
+export function flightTimezoneChange(point, previousTimezone = null) {
+ const zone = timezone(point.timezone, 'arrivalTimezone');
+ const instant = flightInstant(point.local, zone);
+ const info = target => {
+  const offset = Math.round((utcDate(zonedParts(instant, target)).getTime() - instant) / MINUTE);
+  const n = Math.abs(offset), pad = value => String(value).padStart(2, '0');
+  return { offset, offsetLabel: 'UTC' + (offset < 0 ? '-' : '+') + pad(Math.floor(n / 60)) + ':' + pad(n % 60), label: new Intl.DateTimeFormat('zh-TW', { timeZone: target, timeZoneName: 'long' }).formatToParts(instant).find(part => part.type === 'timeZoneName').value };
+ };
+ const current = info(zone);
+ if (!previousTimezone) return { kind: 'initial', message: '起飛時區：' + current.label + ' ' + current.offsetLabel, timezone: zone };
+ const previous = timezone(previousTimezone, 'departureTimezone');
+ if (previous === zone) return null;
+ const deltaMinutes = current.offset - info(previous).offset, n = Math.abs(deltaMinutes);
+ const amount = [Math.floor(n / 60) ? Math.floor(n / 60) + '小時' : '', n % 60 ? n % 60 + '分鐘' : ''].filter(Boolean).join('');
+ const difference = deltaMinutes === 0 ? '時差相同' : (deltaMinutes > 0 ? '快' : '慢') + amount;
+ return { kind: 'change', message: '時區變更：' + current.label + ' ' + current.offsetLabel + '（' + difference + '）', timezone: zone, previousTimezone: previous, deltaMinutes };
+}
+
 /** Plain text summary; escape this string if placing it in HTML. No booking references are exposed. */
 export function formatFlightSummary(raw) {
  const flight = sanitizeFlight(raw);
@@ -172,7 +218,7 @@ export function flightFieldsHtml(raw = {}, { prefix = 'flight', timezones = comm
   return `<label class="flight-field" for="${id}"><span>${fieldLabels[field]}${required ? ' <span aria-hidden="true">*</span>' : ''}</span><input id="${id}" name="${safePrefix}.${field}" type="${type}" value="${escapeHtml(flight[field])}"${required ? ' required' : ''}${placeholder ? ` placeholder="${escapeHtml(placeholder)}"` : ''} maxlength="${maxLength}"${list ? ` list="${safePrefix}-timezones" autocapitalize="none" spellcheck="false"` : ''}${type === 'datetime-local' ? ' step="60"' : ''} autocomplete="off"></label>`;
  };
  const zones = [...new Set([...(Array.isArray(timezones) ? timezones : commonFlightTimezones()), flight.departureTimezone, flight.arrivalTimezone].filter(value => typeof value === 'string' && value.length <= 100))];
- return `<fieldset class="flight-fields" aria-describedby="${safePrefix}-help"><legend>機票資訊</legend><p class="flight-help" id="${safePrefix}-help">出發與抵達分別填寫機票上的當地日期、時間和時區；跨日抵達也請選擇正確日期。每日行程會換算成這趟旅行設定的時區；飛行時間依兩地時差計算。</p><div class="flight-grid">
+ return `<fieldset class="flight-fields" aria-describedby="${safePrefix}-help"><legend>機票資訊</legend><p class="flight-help" id="${safePrefix}-help">出發與抵達分別填寫機票上的當地日期、時間和時區；跨日抵達也請選擇正確日期。航班顯示兩地當地時間；其他行程沿用旅行時區。排序依旅行時區，飛行時間依兩地時差計算。</p><div class="flight-grid">
 ${input('airline', { placeholder: '例如：長榮航空', maxLength: 80 })}${input('number', { placeholder: '例如：BR116', maxLength: 30 })}
 ${input('departureAirport', { placeholder: '例如：台灣桃園 TPE', required: true })}${input('arrivalAirport', { placeholder: '例如：新千歲 CTS', required: true })}
 ${input('departureDateTime', { type: 'datetime-local', required: true, maxLength: 16 })}${input('arrivalDateTime', { type: 'datetime-local', required: true, maxLength: 16 })}

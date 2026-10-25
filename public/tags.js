@@ -53,3 +53,17 @@ export function applyStopTag(days,day,id,value){
  const next=structuredClone(days);next[day].stops[index].tag=label;
  return {days:next,index,changed:(stop.tag||'其他')!==label};
 }
+
+// UI categories map to existing place+tag or flight; no new persisted kind.
+export function itineraryTypeOptions(values = []) {
+ const labels = [...new Set([...tags.map(item => item.label), ...values.filter(value => typeof value === 'string' && value.trim() && value.length <= 30)])];
+ return [{ value: 'place', label: '一般行程（保留分類）' }, ...labels.map(label => ({ value: 'tag:' + label, label })), { value: 'flight', label: '✈ 機票／航班' }];
+}
+export function itineraryTypeValue(stop = {}) { return stop.kind === 'flight' ? 'flight' : stop.tag ? 'tag:' + stop.tag : 'place'; }
+export function resolveItineraryType(value, previousTag = '其他') {
+ if (value === 'flight') return { kind: 'flight', tag: previousTag || '其他' };
+ if (value === 'place') return { kind: 'place', tag: previousTag || '其他' };
+ const tag = typeof value === 'string' && value.startsWith('tag:') ? value.slice(4) : '';
+ if (!tag.trim() || tag.length > 30 || /[\u0000-\u001f]/.test(tag)) throw Error('請選擇有效的行程分類。');
+ return { kind: 'place', tag };
+}
